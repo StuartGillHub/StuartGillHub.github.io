@@ -10,6 +10,7 @@
 <body>
   <canvas id="stage"></canvas>
   <div class="vignette"></div>
+  <div class="strobe" id="strobe" aria-hidden="true"></div>
 
   <header class="topbar">
     <div class="brand"><span class="dot"></span>Xylo<b>fall</b></div>
@@ -28,6 +29,13 @@
   </header>
 
   <aside class="panel hidden" id="settings">
+    <h3>Look</h3>
+    <div class="seg" role="radiogroup" aria-label="Look">
+      <label><input type="radio" name="look" value="auto" checked><span>Auto</span></label>
+      <label><input type="radio" name="look" value="studio"><span>Studio</span></label>
+      <label><input type="radio" name="look" value="neon"><span>Neon</span></label>
+    </div>
+    <label class="check"><input type="checkbox" id="strobes" checked> Strobe flashes <small>Neon look. Up to 3 flashes a second.</small></label>
     <h3>Course</h3>
     <label>Notes used <output id="densityOut"></output>
       <input type="range" id="density" min="0" max="1" step="0.01" value="0.7">

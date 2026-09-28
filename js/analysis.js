@@ -95,6 +95,11 @@
     const rms = new Float32Array(nFrames);
     const norm = 4 / FRAME; // sinusoid amplitude A -> magnitude ~A
     const maxBin = Math.floor((11000 / SR) * FRAME);
+    // band energies for the light show: kick/bass and hi-hats/air
+    const lowE = new Float32Array(nFrames);
+    const highE = new Float32Array(nFrames);
+    const lowTop = Math.round((150 / SR) * FRAME);
+    const highBot = Math.round((4000 / SR) * FRAME);
 
     for (let f = 0; f < nFrames; f++) {
       const off = f * HOP;
@@ -107,15 +112,17 @@
       }
       rms[f] = Math.sqrt(e / FRAME);
       fft(re, im);
-      let sum = 0;
+      let sum = 0, lo = 0, hi = 0;
       for (let k = 1; k < maxBin; k++) {
         const m = Math.sqrt(re[k] * re[k] + im[k] * im[k]) * norm;
+        if (k <= lowTop) lo += m * m; else if (k >= highBot) hi += m * m;
         const l = Math.log1p(1000 * m);
         cur[k] = l;
         const d = l - prev[k];
         if (d > 0) sum += d;
       }
       flux[f] = f === 0 ? 0 : sum;
+      lowE[f] = lo; highE[f] = hi;
       const t = prev; prev = cur; cur = t;
       if (f % 600 === 0) {
         onProgress && onProgress(0.05 + 0.85 * (f / nFrames), 'Listening for notes');
@@ -149,7 +156,7 @@
 
     onProgress && onProgress(0.93, 'Finding the key');
     const an = {
-      samples, odf, mean, rms, loud, nFrames,
+      samples, odf, mean, rms, loud, nFrames, lowE, highE,
       duration: audioBuffer.duration,
       chromaCache: new Map(),
     };
@@ -339,9 +346,126 @@
     an.key = { tonic: best.tonic, minor: best.minor, scale, name: NOTE_NAMES[best.tonic] + (best.minor ? ' minor' : ' major') };
   }
 
+  /* ---------- light show: tempo, beat grid, kicks, energy, drops ---------- */
+  function lightShow(an) {
+    if (an.show) return an.show;
+    const { odf, rms, lowE, highE, nFrames } = an;
+    const fps = SR / HOP;
+    const pct = (arr, q) => { const a = Array.from(arr).sort((x, y) => x - y); return a[Math.floor(a.length * q)] || 1e-9; };
+
+    // Energy envelope (0..~1), smoothed over ~0.25 s, sampled at 30 Hz.
+    const ENV_HZ = 30;
+    const nEnv = Math.ceil((nFrames / fps) * ENV_HZ) + 1;
+    const env = new Float32Array(nEnv);
+    const ref = pct(rms, 0.95);
+    const win = Math.round(0.12 * fps);
+    for (let i = 0; i < nEnv; i++) {
+      const c = Math.round((i / ENV_HZ) * fps);
+      let s = 0, n = 0;
+      for (let f = Math.max(0, c - win); f <= Math.min(nFrames - 1, c + win); f++) { s += rms[f]; n++; }
+      env[i] = n ? Math.min(1.2, s / n / ref) : 0;
+    }
+
+    // Kick drum hits: onsets in the bass band.
+    const lowL = new Float32Array(nFrames);
+    const lref = pct(lowE, 0.97) || 1e-9;
+    for (let f = 0; f < nFrames; f++) lowL[f] = Math.log1p((20 * lowE[f]) / lref);
+    const lowFlux = new Float32Array(nFrames);
+    for (let f = 2; f < nFrames; f++) lowFlux[f] = Math.max(0, lowL[f] - Math.max(lowL[f - 1], lowL[f - 2]));
+    const lfRef = pct(lowFlux, 0.99) || 1e-9;
+    const kicks = [];
+    const nb = Math.round(0.06 * fps);
+    let lastK = -1;
+    for (let f = nb; f < nFrames - nb; f++) {
+      const v = lowFlux[f] / lfRef;
+      if (v < 0.28) continue;
+      let isMax = true;
+      for (let k = -nb; k <= nb; k++) if (k && lowFlux[f + k] > lowFlux[f]) { isMax = false; break; }
+      if (!isMax) continue;
+      const t = (f * HOP + ONSET_OFFSET) / SR;
+      if (lastK >= 0 && t - lastK < 0.2) continue;
+      kicks.push({ t, s: Math.min(1, v) });
+      lastK = t;
+    }
+
+    // Tempo: autocorrelation of the onset function (70–180 BPM), with a
+    // gentle preference for tempos near 120.
+    const oc = new Float32Array(nFrames);
+    for (let f = 0; f < nFrames; f++) oc[f] = odf[f] + 0.5 * lowFlux[f] / lfRef;
+    const maxF = Math.min(nFrames, Math.round(150 * fps));
+    let bestLag = Math.round(fps * 0.5), bestScore = -1;
+    for (let lag = Math.round((60 / 180) * fps); lag <= Math.round((60 / 70) * fps); lag++) {
+      let s = 0;
+      for (let f = lag; f < maxF; f++) s += oc[f] * oc[f - lag];
+      const bpm = (60 * fps) / lag;
+      s *= Math.exp(-0.5 * Math.pow(Math.log2(bpm / 120) / 0.9, 2));
+      if (s > bestScore) { bestScore = s; bestLag = lag; }
+    }
+    // refine the period with a parabola through neighbouring lags
+    const acf = (lag) => { let s = 0; for (let f = lag; f < maxF; f++) s += oc[f] * oc[f - lag]; return s; };
+    const a = acf(bestLag - 1), b = acf(bestLag), c = acf(bestLag + 1);
+    const den = a - 2 * b + c;
+    const lagF = bestLag + (den < 0 ? Math.max(-0.5, Math.min(0.5, (0.5 * (a - c)) / den)) : 0);
+    const period = lagF / fps;
+    const bpm = 60 / period;
+    // Beat phase: the grid offset that lines up with the most onset energy,
+    // weighted towards the kick drum (hats and stabs often sit off the beat).
+    const pc = new Float32Array(nFrames);
+    for (let f = 0; f < nFrames; f++) pc[f] = 0.35 * odf[f] + 1.5 * lowFlux[f] / lfRef;
+    let bestPh = 0, bestPs = -1;
+    for (let k = 0; k < 64; k++) {
+      const ph = (k / 64) * period;
+      let s = 0;
+      for (let t = ph; t < Math.min(nFrames / fps, 150); t += period) {
+        const f = Math.round((t * SR - ONSET_OFFSET) / HOP);
+        if (f >= 0 && f < nFrames) s += pc[f] + 0.5 * (pc[f - 1] || 0) + 0.5 * (pc[f + 1] || 0);
+      }
+      if (s > bestPs) { bestPs = s; bestPh = ph; }
+    }
+
+    // Drops: the smoothed energy jumps up sharply.
+    const drops = [];
+    const avg = (i, w) => { let s = 0, n = 0; for (let j = Math.max(0, i - w); j < Math.min(nEnv, i + w); j++) { s += env[j]; n++; } return n ? s / n : 0; };
+    for (let i = ENV_HZ * 2; i < nEnv - ENV_HZ; i += 3) {
+      const before = avg(i - ENV_HZ, ENV_HZ), after = avg(i + ENV_HZ / 2, ENV_HZ / 2);
+      if (after > 0.35 && after > before * 1.7 + 0.08 && (!drops.length || i / ENV_HZ - drops[drops.length - 1] > 8)) {
+        // place the drop on the first strong onset of the new section
+        let t = i / ENV_HZ;
+        for (let j = i; j < Math.min(nEnv - 1, i + ENV_HZ); j++) if (env[j + 1] - env[j] > 0.08) { t = (j + 1) / ENV_HZ; break; }
+        drops.push(t);
+      }
+    }
+
+    // Character of the track, for choosing a look automatically.
+    let onGrid = 0, gridN = 0;
+    const dur = nFrames / fps;
+    for (let t = bestPh; t < dur; t += period) {
+      gridN++;
+      // binary search nearest kick
+      let lo = 0, hi = kicks.length - 1;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (kicks[m].t < t) lo = m + 1; else hi = m; }
+      const d = Math.min(Math.abs((kicks[lo] || { t: 1e9 }).t - t), Math.abs((kicks[lo - 1] || { t: 1e9 }).t - t));
+      if (d < 0.07) onGrid++;
+    }
+    const kickRegularity = gridN ? onGrid / gridN : 0;
+    let lowSum = 0, highSum = 0, allSum = 0;
+    for (let f = 0; f < nFrames; f++) { lowSum += lowE[f]; highSum += highE[f]; allSum += rms[f] * rms[f]; }
+    let meanEnergy = 0;
+    for (let i = 0; i < nEnv; i++) meanEnergy += env[i];
+    meanEnergy /= nEnv || 1;
+    const danceable = kickRegularity > 0.55 && bpm >= 100 && bpm <= 180;
+    const suggested = danceable || (bpm >= 118 && kickRegularity > 0.4) ? 'neon' : 'studio';
+
+    an.show = {
+      bpm, period, phase: bestPh, kicks, env, envHz: ENV_HZ, drops,
+      kickRegularity, meanEnergy, suggested,
+    };
+    return an.show;
+  }
+
   function noteName(midi) {
     return NOTE_NAMES[((midi % 12) + 12) % 12] + (Math.floor(midi / 12) - 1);
   }
 
-  XB.Analysis = { analyse, pickOnsets, noteName, SR };
+  XB.Analysis = { analyse, pickOnsets, lightShow, noteName, SR };
 })();

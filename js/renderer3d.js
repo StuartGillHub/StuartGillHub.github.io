@@ -12,6 +12,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import * as TX from './textures.js';
+import { NeonShow, neonNoteColor } from './neon.js';
 
 const XB = window.XB;
 const { R, T, G } = XB.PHYS;
@@ -78,8 +79,10 @@ class Renderer3D {
     this.camera = new THREE.PerspectiveCamera(FOV, 1, 0.05, 60);
 
     // --- lights: warm key with soft shadows, warm sky/bounce, glow pool ---
-    // dim room ambient
-    scene.add(new THREE.HemisphereLight('#fff3e6', '#3a2a22', 0.42));
+    // Studio look: dim room ambient
+    const studio = (this.studio = new THREE.Group());
+    scene.add(studio);
+    studio.add(new THREE.HemisphereLight('#fff3e6', '#3a2a22', 0.42));
     // warm amber neon strip below the frame, washing up the wall: grazing
     // light that throws long shadows of the bars, pegs and ball upwards
     const key = (this.key = new THREE.SpotLight('#ffa05a', 22, 0, 1.2, 1, 1.2));
@@ -91,16 +94,16 @@ class Renderer3D {
     key.shadow.blurSamples = 12;
     key.shadow.camera.near = 0.1;
     key.shadow.camera.far = 9;
-    scene.add(key, key.target);
+    studio.add(key, key.target);
     // a second, rosier neon from lower right for colour depth (no shadows)
     const neon2 = (this.neon2 = new THREE.SpotLight('#ff7a8c', 5, 0, 1.1, 1, 1.2));
-    scene.add(neon2, neon2.target);
+    studio.add(neon2, neon2.target);
     // and an amber one lower left, so together they read as a long strip
     const neon3 = (this.neon3 = new THREE.SpotLight('#ffb066', 4, 0, 1.1, 1, 1.2));
-    scene.add(neon3, neon3.target);
+    studio.add(neon3, neon3.target);
     // faint frontal fill so the fronts of the bars never go black
     const fill = (this.fill = new THREE.DirectionalLight('#ffe8d2', 0.45));
-    scene.add(fill, fill.target);
+    studio.add(fill, fill.target);
     this.glowLights = [];
     for (let i = 0; i < 4; i++) {
       const l = new THREE.PointLight(GLOW, 0, 0.8, 2);
@@ -118,6 +121,8 @@ class Renderer3D {
     );
     this.wall.receiveShadow = true;
     scene.add(this.wall);
+    this.studioWallMat = this.wall.material;
+    this.neon = new NeonShow(this, tex.normalMap);
 
     // --- shared materials ---
     this.woodTex = TX.makeWoodTexture();
@@ -141,10 +146,12 @@ class Renderer3D {
     this.capGeo = new THREE.SphereGeometry(0.0075, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2).rotateX(Math.PI / 2);
 
     // --- ball ---
+    this.ballTex = TX.makeBallTexture();
     this.ball = new THREE.Mesh(
       new THREE.SphereGeometry(R, 48, 32),
-      new THREE.MeshPhysicalMaterial({ map: TX.makeBallTexture(), roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.06 })
+      new THREE.MeshPhysicalMaterial({ map: this.ballTex, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.06 })
     );
+    this.studioBallMat = this.ball.material;
     this.ball.castShadow = true;
     this.ball.position.z = ZB;
     scene.add(this.ball);
@@ -163,7 +170,30 @@ class Renderer3D {
     this.cam = { x: 0, y: 0 };
     this.course = null;
     this.active = new Set();
+    this.skin = 'studio';
     this.resize();
+  }
+
+  /* ---------------- skins ---------------- */
+  setSkin(name) {
+    if (name === this.skin) return;
+    this.skin = name;
+    const neon = name === 'neon';
+    this.studio.visible = !neon;
+    this.neon.group.visible = neon;
+    this.wall.material = neon ? this.neon.wallMat : this.studioWallMat;
+    this.ball.material = neon ? this.neon.ballMaterial(this.ballTex) : this.studioBallMat;
+    this.scene.background.set(neon ? '#050308' : '#23170f');
+    this.scene.environment = neon ? this.neon.env : this.sceneEnv;
+    this.scene.environmentIntensity = neon ? 0.8 : 0.55;
+    this.r.toneMappingExposure = neon ? 1.0 : 0.95;
+    this.bloom.strength = neon ? 0.95 : 0.42;
+    this.bloom.radius = neon ? 0.55 : 0.6;
+    this.bloom.threshold = neon ? 0.8 : 1.02;
+    this.glowLights.forEach((l) => { l.intensity = 0; });
+    document.body.classList.toggle('skin-neon', neon);
+    // rebuild the course with this skin's materials
+    if (this.course) { const c = this.course; this.clearCourse(); this.course = null; this.pendingCourse = c; }
   }
 
   // Adaptive quality: if frames are slow, render at a lower pixel ratio.
@@ -214,6 +244,7 @@ class Renderer3D {
 
   /* ---------------- building the course ---------------- */
   clearCourse() {
+    for (const o of this.barObjs || []) if (o.flashMat) o.flashMat.dispose();
     const g = this.courseGroup;
     g.traverse((o) => {
       if (o.isMesh) {
@@ -247,7 +278,8 @@ class Renderer3D {
     const pc = ((b.midi % 12) + 12) % 12;
     // sleek glockenspiel bar: polished, faintly brushed, anodised tint;
     // a thin-film sheen that blooms into colour when it is struck
-    const mat = new THREE.MeshPhysicalMaterial({
+    const neon = this.skin === 'neon';
+    const mat = neon ? this.neon.barMat(pc) : new THREE.MeshPhysicalMaterial({
       color: metalTint(pc), metalness: 1, roughness: 0.17, roughnessMap: this.brushed,
       envMap: this.sceneEnv, envMapIntensity: 2.2,
       clearcoat: 0.6, clearcoatRoughness: 0.08,
@@ -259,9 +291,17 @@ class Renderer3D {
     bar.castShadow = bar.receiveShadow = true;
     bar.userData.ownGeo = bar.userData.ownMat = true;
     grp.add(bar);
+    let strip = null;
+    if (neon) {
+      // neon edge along the struck face (on the side the ball hits)
+      strip = new THREE.Mesh(new THREE.BoxGeometry(L * 0.94, 0.0035, 0.004), this.neon.stripMats[pc]);
+      strip.position.set(0, T / 2 - 0.004, BAR_D / 2 + 0.001);
+      strip.userData.ownGeo = true;
+      grp.add(strip);
+    }
     // Polished steel pins at the vibration nodes, out of the wall and under
     // the bar (a xylophone bar rests on its nodes), just proud of its front.
-    const capMat = new THREE.MeshPhysicalMaterial({ color: '#f4f5f7', metalness: 1, roughness: 0.05, envMap: this.metalEnv, envMapIntensity: 1.1, emissive: GLOW, emissiveIntensity: 0 });
+    const capMat = new THREE.MeshPhysicalMaterial({ color: '#f4f5f7', metalness: 1, roughness: 0.05, envMap: neon ? this.neon.env : this.metalEnv, envMapIntensity: neon ? 1.6 : 1.1, emissive: neon ? neonNoteColor(pc) : GLOW, emissiveIntensity: 0 });
     const pinY = -T / 2 - PEG_R * 0.92;
     const zFront = BAR_D / 2 + 0.014;
     const pinLen = ZB + zFront;
@@ -279,7 +319,7 @@ class Renderer3D {
       grp.add(fl);
     }
     bar.userData.capMat = capMat;
-    if (L > 0.1) {
+    if (L > 0.1 && !neon) {
       const lt = new THREE.Mesh(this.letterGeoms[pc], this.letterMat);
       lt.position.set(0, 0, BAR_D / 2 + 0.0008);
       if (b.ceil) lt.rotation.z = Math.PI; // bar hangs upside down: keep the letter upright
@@ -289,7 +329,7 @@ class Renderer3D {
     grp.traverse((o) => { o.matrixAutoUpdate = false; });
     grp.matrixAutoUpdate = true;
     this.courseGroup.add(grp);
-    return { grp, mat, capMat, base: { x: cx, y: cy, rot: grp.rotation.z }, b };
+    return { grp, mat, capMat, strip, pc, base: { x: cx, y: cy, rot: grp.rotation.z }, b };
   }
 
   makeWire(seg) {
@@ -359,7 +399,7 @@ class Renderer3D {
       geos.push(new THREE.TubeGeometry(curve, Math.max(8, pts.length * 2), RAIL_R, 7, false));
       for (const p of [pts[0], pts[pts.length - 1]]) geos.push(new THREE.SphereGeometry(RAIL_R * 1.05, 8, 6).translate(p.x, p.y, p.z));
     }
-    const rails = new THREE.Mesh(mergeGeometries(geos), this.brass);
+    const rails = new THREE.Mesh(mergeGeometries(geos), this.skin === 'neon' ? this.neon.railMat : this.brass);
     rails.castShadow = true; rails.receiveShadow = true;
     rails.userData.ownGeo = true;
 
@@ -385,7 +425,7 @@ class Renderer3D {
     const grp = new THREE.Group();
     grp.add(rails);
     if (tg.length) {
-      const ties = new THREE.Mesh(mergeGeometries(tg), this.brass);
+      const ties = new THREE.Mesh(mergeGeometries(tg), this.skin === 'neon' ? this.neon.tieMat : this.brass);
       ties.castShadow = true;
       ties.userData.ownGeo = true;
       grp.add(ties);
@@ -456,6 +496,18 @@ class Renderer3D {
       o.grp.position.set(o.base.x + b.nx * dip, o.base.y + b.ny * dip, ZB);
       o.grp.rotation.z = o.base.rot + rock;
       const glow = Math.exp(-age / 0.32) * (0.55 + 0.45 * b.strength);
+      if (this.skin === 'neon') {
+        // the bar flares in its note colour; its neon edge blazes
+        o.mat.emissiveIntensity = 0.55 * glow;
+        o.capMat.emissiveIntensity = 2 * glow;
+        if (o.strip) {
+          if (!o.flashMat) o.flashMat = new THREE.MeshBasicMaterial({ toneMapped: false });
+          o.strip.material = o.flashMat;
+          o.flashMat.color.copy(neonNoteColor(o.pc)).lerp(new THREE.Color('#ffffff'), 0.2 * glow).multiplyScalar(1.4 + 5 * glow);
+        }
+        lights.push({ o, glow, age });
+        continue;
+      }
       o.mat.emissiveIntensity = 0.34 * glow;
       // the flash drifts from warm gold through the bar's own tint as it fades
       const h0 = 0.09, h1 = o.mat.userData.hue;
@@ -472,24 +524,32 @@ class Renderer3D {
       const e = lights[k];
       if (!e) { l.intensity = 0; return; }
       l.position.set(e.o.base.x, e.o.base.y, ZB + 0.22);
-      l.intensity = 0.12 * e.glow;
+      if (this.skin === 'neon') {
+        l.color.copy(neonNoteColor(e.o.pc));
+        l.intensity = 0.22 * e.glow;
+      } else {
+        l.color.copy(GLOW);
+        l.intensity = 0.12 * e.glow;
+      }
     });
   }
   resetBar(o) {
     o.grp.position.set(o.base.x, o.base.y, ZB);
     o.grp.rotation.z = o.base.rot;
     o.mat.emissiveIntensity = 0;
-    o.mat.iridescence = 0.08;
+    if (this.skin !== 'neon') o.mat.iridescence = 0.08;
     o.capMat.emissiveIntensity = 0;
+    if (o.strip) o.strip.material = this.neon.stripMats[o.pc];
   }
 
-  draw(course, camTrack, t) {
+  draw(course, camTrack, t, show, opts) {
     this.adapt();
     let ball;
     if (course) {
       if (course !== this.course) this.buildCourse(course);
+      this.pendingCourse = null;
       ball = XB.Course.evalAt(course, t, {});
-      this.cam = XB.Camera.at(camTrack, t, ball, this.visW, this.visH);
+      this.cam = this.focusBall ? { x: ball.x, y: ball.y } : XB.Camera.at(camTrack, t, ball, this.visW, this.visH);
       this.ball.visible = true;
       this.ball.position.set(ball.x, ball.y, ZB);
       this.ball.rotation.z = ball.ang;
@@ -519,6 +579,10 @@ class Renderer3D {
     this.neon3.target.position.set(x - 0.25 * this.visW, y - vh * 0.05, 0);
     this.fill.position.set(x - 0.5, y + 0.8, 3);
     this.fill.target.position.set(x, y, 0);
+    if (this.skin === 'neon' && show) {
+      this.neon.prepare(show);
+      this.neon.update(t, ball, this.cam, opts || { strobes: true });
+    } else if (this.neon.flashEl) this.neon.flashEl.style.opacity = '0';
     this.composer.render();
   }
 }

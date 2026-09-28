@@ -130,3 +130,33 @@ body.playing #playBtn .i-play { display: none; }
 @media (max-width: 560px) {
   #audiusBtn { padding: 8px 11px; }
 }
+
+/* Look selector */
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; border-radius: 999px;
+  background: rgba(255,230,200,0.08); border: 1px solid var(--line); margin: 6px 0 12px; }
+.seg label { margin: 0; }
+.seg input { position: absolute; opacity: 0; pointer-events: none; }
+.seg span { display: block; text-align: center; padding: 7px 0; border-radius: 999px; cursor: pointer; font-weight: 600; font-size: 13px; }
+.seg input:checked + span { background: var(--accent); color: #fff; }
+.seg input:focus-visible + span { outline: 2px solid var(--accent2); }
+.panel label.check { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.panel label.check small { flex-basis: 100%; color: var(--muted); font-weight: 400; font-size: 11px; }
+.panel label.check input { accent-color: var(--accent); width: 18px; height: 18px; margin: 0; }
+
+/* Strobe: a full-screen white flash, driven from the light show */
+.strobe { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 2; mix-blend-mode: screen; }
+
+/* Neon look: club-dark interface with neon accents */
+body.skin-neon {
+  --glass: rgba(10, 8, 20, 0.62);
+  --line: rgba(160, 120, 255, 0.28);
+  --muted: #b7a9d8;
+  --accent: #d11fb6;
+  --accent2: #37e6ff;
+}
+body.skin-neon .vignette { background:
+  linear-gradient(to top, rgba(120, 40, 255, 0.14), rgba(120, 40, 255, 0) 24%),
+  radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 40%, rgba(4,2,10,0.5) 78%, rgba(2,1,6,0.85) 100%); }
+body.skin-neon .btn.primary { background: linear-gradient(135deg, #b0129a, #6c2bff); box-shadow: 0 6px 24px rgba(209, 31, 182, 0.45); }
+body.skin-neon .brand b { color: #37e6ff; text-shadow: 0 0 12px rgba(55, 230, 255, 0.8); }
+body.skin-neon .playhead { background: #fff; box-shadow: 0 0 10px #37e6ff; }

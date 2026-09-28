@@ -8,7 +8,8 @@
   const renderer = new (XB.Renderer || XB.Renderer2D)(canvas);
   const audio = new XB.AudioEngine();
 
-  const settings = { density: 0.7, wireGap: 1.0, songVol: 0.9, fxVol: 0.35, sync: 0 };
+  const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const settings = { density: 0.7, wireGap: 1.0, songVol: 0.9, fxVol: 0.35, sync: 0, look: 'auto', strobes: !reducedMotion };
   const state = {
     analysis: null, buffer: null, course: null, cam: null, name: '',
     playing: false, time: 0, fxCursor: 0, evCursor: 0, seed: 1,
@@ -144,6 +145,7 @@
     for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
     state.seed = (h ^ Math.round(buf.duration * 1000)) >>> 0;
     rebuild();
+    applyLook();
     show($('progress'), false);
     show($('transport'), true);
     drawTimeline();
@@ -159,6 +161,29 @@
     }, 400);
   }
 
+  /* ---------- look (skin) ---------- */
+  let strobeWarned = false;
+  function applyLook() {
+    if (!renderer.setSkin) return;
+    const show = state.analysis ? XB.Analysis.lightShow(state.analysis) : null;
+    state.show = show;
+    const skin = settings.look === 'auto' ? (show ? show.suggested : 'studio') : settings.look;
+    renderer.setSkin(skin);
+    state.skin = skin;
+    if (skin === 'neon' && settings.strobes && !strobeWarned) {
+      strobeWarned = true;
+      toast('Neon look uses flashing lights. You can turn strobe flashes off in Settings.', 6000);
+    }
+    updateStats();
+  }
+  function updateStats() {
+    if (!state.course) return;
+    const wires = state.course.wires.length;
+    const look = state.skin === 'neon' ? 'Neon' : 'Studio';
+    const bpm = state.show ? ` · ${Math.round(state.show.bpm)} BPM` : '';
+    $('stats').textContent = `${state.analysis.key.name}${bpm} · ${look} look · ${state.course.bars.length} bars · ${wires} wire track${wires === 1 ? '' : 's'}`;
+  }
+
   function rebuild() {
     if (!state.analysis) return;
     const keepTime = state.course ? currentTime() : null;
@@ -166,8 +191,7 @@
     state.notes = notes;
     state.course = XB.Course.build(notes, { wireGap: settings.wireGap, seed: state.seed });
     state.cam = XB.Camera.build(state.course, renderer.visW, renderer.visH);
-    const wires = state.course.wires.length;
-    $('stats').textContent = `${state.analysis.key.name} · ${state.course.bars.length} bars · ${wires} wire track${wires === 1 ? '' : 's'}`;
+    updateStats();
     drawTimeline();
     if (keepTime !== null) seek(keepTime);
   }
@@ -243,7 +267,7 @@
     if (course && state.playing && t > endTime() + 0.3) {
       pause(); state.time = endTime(); t = state.time;
     }
-    renderer.draw(course, state.cam, t);
+    renderer.draw(course, state.cam, t, state.show, settings);
     if (!course) return;
 
     if (state.playing && audio.ctx) {
@@ -360,11 +384,19 @@
     if (state.course) state.cam = XB.Camera.build(state.course, renderer.visW, renderer.visH);
   });
 
+  // Look + strobe controls
+  document.querySelectorAll('input[name="look"]').forEach((el) => {
+    el.addEventListener('change', () => { if (el.checked) { settings.look = el.value; applyLook(); } });
+  });
+  $('strobes').checked = settings.strobes;
+  $('strobes').addEventListener('change', () => { settings.strobes = $('strobes').checked; });
+
   // Debug / testing hooks
   XB.app.loadDemo = loadDemo;
   XB.app.seek = seek;
   XB.app.pause = pause;
   XB.app.play = play;
   XB.app.rebuild = rebuild;
-  XB.app.renderAt = (t) => { pause(); state.time = t; renderer.draw(state.course, state.cam, t); };
+  XB.app.renderAt = (t) => { pause(); state.time = t; renderer.draw(state.course, state.cam, t, state.show, settings); };
+  XB.app.setLook = (v) => { settings.look = v; document.querySelector(`input[name="look"][value="${v}"]`).checked = true; applyLook(); };
 })();
