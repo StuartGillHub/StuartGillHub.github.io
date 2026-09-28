@@ -140,6 +140,8 @@ body.playing #playBtn .i-play { display: none; }
 .seg input:checked + span { background: var(--accent); color: #fff; }
 .seg input:focus-visible + span { outline: 2px solid var(--accent2); }
 .panel label.check { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.panel .field-label { margin: 10px 0 8px; font-weight: 600; font-size: 14px; }
+.panel .field-label small { display: block; margin-top: 2px; }
 .panel label.check small { flex-basis: 100%; color: var(--muted); font-weight: 400; font-size: 11px; }
 .panel label.check input { accent-color: var(--accent); width: 18px; height: 18px; margin: 0; }
 

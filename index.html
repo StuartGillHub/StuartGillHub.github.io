@@ -41,6 +41,12 @@
       <input type="range" id="density" min="0" max="1" step="0.01" value="0.7">
       <small><span>Only key hits</span><span>Every note</span></small>
     </label>
+    <div class="field-label">Bumpers <small>Bars kick the ball like pinball bumpers</small></div>
+    <div class="seg" role="radiogroup" aria-label="Bumpers">
+      <label><input type="radio" name="bumpers" value="off"><span>Off</span></label>
+      <label><input type="radio" name="bumpers" value="auto" checked><span>Auto</span></label>
+      <label><input type="radio" name="bumpers" value="wild"><span>Wild</span></label>
+    </div>
     <label>Wire track after a pause of <output id="wireOut"></output>
       <input type="range" id="wireGap" min="0.8" max="3" step="0.05" value="1.0">
     </label>

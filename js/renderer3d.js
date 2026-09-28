@@ -104,6 +104,18 @@ class Renderer3D {
     // faint frontal fill so the fronts of the bars never go black
     const fill = (this.fill = new THREE.DirectionalLight('#ffe8d2', 0.45));
     studio.add(fill, fill.target);
+    // Pinball kickers: an amber lamp strip along the struck edge, and a ring
+    // of light that bursts from the contact point when one fires.
+    this.kickMat = new THREE.MeshStandardMaterial({ color: '#2a1606', emissive: '#ff8a1e', emissiveIntensity: 0.9, roughness: 0.4 });
+    this.kickRings = [];
+    const ringGeo = new THREE.RingGeometry(0.8, 1, 48);
+    for (let i = 0; i < 4; i++) {
+      const m = new THREE.MeshBasicMaterial({ color: '#ffb35c', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+      const ring = new THREE.Mesh(ringGeo, m);
+      ring.visible = false;
+      scene.add(ring);
+      this.kickRings.push(ring);
+    }
     this.glowLights = [];
     for (let i = 0; i < 4; i++) {
       const l = new THREE.PointLight(GLOW, 0, 0.8, 2);
@@ -292,7 +304,13 @@ class Renderer3D {
     bar.userData.ownGeo = bar.userData.ownMat = true;
     grp.add(bar);
     let strip = null;
-    if (neon) {
+    const kicker = b.kick > 0.15;
+    if (kicker && !neon) {
+      strip = new THREE.Mesh(new RoundedBoxGeometry(L * 0.9, 0.006, 0.006, 1, 0.002), this.kickMat);
+      strip.position.set(0, T / 2 - 0.002, BAR_D / 2 + 0.001);
+      strip.userData.ownGeo = true;
+      grp.add(strip);
+    } else if (neon) {
       // neon edge along the struck face (on the side the ball hits)
       strip = new THREE.Mesh(new THREE.BoxGeometry(L * 0.94, 0.0035, 0.004), this.neon.stripMats[pc]);
       strip.position.set(0, T / 2 - 0.004, BAR_D / 2 + 0.001);
@@ -491,7 +509,10 @@ class Renderer3D {
       const b = o.b;
       const age = t - b.t;
       const env = Math.exp(-age / 0.07);
-      const dip = -0.005 * (0.4 + b.vin * 0.15) * env * Math.cos(age * Math.PI * 22);
+      let dip = -0.005 * (0.4 + b.vin * 0.15) * env * Math.cos(age * Math.PI * 22);
+      // a kicker punches out along its face as it fires, then springs back
+      const kick = b.kick > 0.15 ? b.kick : 0;
+      if (kick) dip += 0.016 * kick * Math.min(1, age / 0.012) * Math.exp(-age / 0.06);
       const rock = 0.018 * Math.exp(-age / 0.25) * Math.sin(age * Math.PI * 14) * (0.3 + b.strength);
       o.grp.position.set(o.base.x + b.nx * dip, o.base.y + b.ny * dip, ZB);
       o.grp.rotation.z = o.base.rot + rock;
@@ -503,7 +524,7 @@ class Renderer3D {
         if (o.strip) {
           if (!o.flashMat) o.flashMat = new THREE.MeshBasicMaterial({ toneMapped: false });
           o.strip.material = o.flashMat;
-          o.flashMat.color.copy(neonNoteColor(o.pc)).lerp(new THREE.Color('#ffffff'), 0.2 * glow).multiplyScalar(1.4 + 5 * glow);
+          o.flashMat.color.copy(neonNoteColor(o.pc)).lerp(new THREE.Color('#ffffff'), (0.2 + 0.6 * kick) * glow).multiplyScalar(1.4 + (5 + 6 * kick) * glow);
         }
         lights.push({ o, glow, age });
         continue;
@@ -516,9 +537,30 @@ class Renderer3D {
       o.mat.emissive.setHSL((h0 + dh * mix + 1) % 1, 0.75, 0.55);
       o.mat.iridescence = 0.08 + 0.9 * glow;
       o.capMat.emissiveIntensity = 1.6 * glow;
+      if (kick && o.strip) {
+        if (!o.flashMat) o.flashMat = this.kickMat.clone();
+        o.strip.material = o.flashMat;
+        o.flashMat.emissiveIntensity = 0.9 + 9 * kick * Math.exp(-age / 0.2);
+      }
       lights.push({ o, glow, age });
     }
     this.active = now;
+    // burst rings for the kickers that fired most recently
+    let r = 0;
+    for (let i = times.length - 1; i >= lo && r < this.kickRings.length; i--) {
+      const b = this.barObjs[i].b;
+      const age = t - b.t;
+      if (age < 0 || !(b.kick > 0.15)) continue;
+      if (age > 0.3) break;
+      const ring = this.kickRings[r++];
+      const k = age / 0.3;
+      ring.visible = true;
+      ring.position.set(b.sx, b.sy, ZB + 0.012);
+      ring.scale.setScalar(0.03 + 0.2 * (1 - (1 - k) * (1 - k)) * (0.5 + 0.5 * b.kick));
+      ring.material.color.set(this.skin === 'neon' ? '#d8ff3a' : '#ffb35c');
+      ring.material.opacity = (1 - k) * (0.5 + 0.5 * b.kick);
+    }
+    for (; r < this.kickRings.length; r++) this.kickRings[r].visible = false;
     lights.sort((a, b) => a.age - b.age);
     this.glowLights.forEach((l, k) => {
       const e = lights[k];
@@ -539,7 +581,7 @@ class Renderer3D {
     o.mat.emissiveIntensity = 0;
     if (this.skin !== 'neon') o.mat.iridescence = 0.08;
     o.capMat.emissiveIntensity = 0;
-    if (o.strip) o.strip.material = this.neon.stripMats[o.pc];
+    if (o.strip) o.strip.material = this.skin === 'neon' ? this.neon.stripMats[o.pc] : this.kickMat;
   }
 
   draw(course, camTrack, t, show, opts) {

@@ -85,7 +85,16 @@
   // normal n and tangent t = (n.y, -n.x): restitution on the normal part,
   // Coulomb friction on the slip of the contact point, capped at the impulse
   // that makes the ball roll. Returns outgoing velocity and spin.
-  function impact(vx, vy, w, nx, ny) {
+  // Active bumpers: like a pinball pop bumper, a bar can fire as it is hit,
+  // adding up to KICK_V m/s along its face on top of the normal bounce.
+  // kickNow is this bar's strength (0..1), kickNext the next bar's. Like a
+  // real kicker with an adjustable coil, each bar fires only as hard as its
+  // shot needs (a fraction of its strength), so the ball stays catchable.
+  const KICK_V = 3.6;
+  const KICK_FRACS = [0, 0.2, 0.4, 0.6, 0.8, 1];
+  let kickNow = 0, kickNext = 0;
+
+  function impact(vx, vy, w, nx, ny, kick) {
     const tX = ny, tY = -nx;
     const vn = vx * nx + vy * ny;
     const vt = vx * tX + vy * tY;
@@ -94,7 +103,7 @@
     let jt = Math.min(MU * jn, (2 / 7) * Math.abs(slip));
     jt = slip > 0 ? -jt : jt;
     const vt2 = vt + jt;
-    const vn2 = -E * vn;
+    const vn2 = -E * vn + (kick || 0) * KICK_V;
     return { x: tX * vt2 + nx * vn2, y: tY * vt2 + ny * vn2, w: w + (2.5 * jt) / R };
   }
 
@@ -136,8 +145,9 @@
   // Where the ball should head after a strike. side: how this bar is struck
   // ('floor' from above, 'ceil' on its underside); nextSide: how the next one
   // will be. A ceiling bar has to be reached while the ball is still rising.
-  function strikeTarget(p, vin, dt, dir, side, nextSide, steer) {
+  function strikeTarget(p, vin, dt, dir, side, nextSide, steer, kick) {
     const pingPong = side === 'ceil' || nextSide === 'ceil';
+    const k = kick || 0;
     // Musical staircase: short notes = small steps; longer notes = bigger hops.
     const reach = (pingPong ? 0.06 + 1.0 * dt : Math.min(0.06 + 0.6 * dt, 0.8)) * steer;
     // A bounce can only give back ~e*|v| of speed: if the ideal hop is out of
@@ -149,8 +159,19 @@
     else if (side === 'ceil') dy = -(0.12 + 0.3 * dt + 0.5 * G * dt * dt); // knocked back down, below where we came from
     else dy = -Math.max(Math.min(0.07 + 0.38 * dt, 0.6), 0.5 * G * dt * dt - vmax * dt);
     // keep the ball calm enough for what's coming (fast notes need a slow ball)
-    const vcap = pingPong ? 3.4 : 2.1 + 2 * dt;
-    return { tx: p.x + dir * reach, ty: p.y + dy, vcap };
+    let vcap = pingPong ? 3.4 : 2.1 + 2 * dt;
+    let rch = reach;
+    if (k > 0) {
+      // pinball: long, flat, fast shots across the wall, powered by the bumpers
+      // (kept narrow enough to stay on a phone screen: the speed comes from a
+      // steeper dive instead)
+      const pr = Math.min(0.25 + 2.2 * dt, 1.1) * steer;
+      rch = reach + (pr - reach) * k;
+      if (side !== 'ceil' && nextSide !== 'ceil') dy += (-(0.14 + 0.8 * dt) - dy) * k;
+      vcap += 5.5 * k;
+    }
+    // kicker bars may stand steeper, like the side kickers of a pinball table
+    return { tx: p.x + dir * rch, ty: p.y + dy, vcap, steep: 0.75 + 0.4 * k, span: 1.15 + 0.25 * k, vmin: 4.2 * k };
   }
 
   // Cheap part of a strike's cost: aim, tilt, speed and arrival direction.
@@ -158,7 +179,7 @@
     const lx = p.x + out.x * dt;
     const ly = p.y + out.y * dt - 0.5 * G * dt * dt;
     let cost = (lx - tgt.tx) ** 2 + 1.5 * (ly - tgt.ty) ** 2 + 0.012 * tilt * tilt;
-    const steep = Math.abs(tilt) - 0.75;
+    const steep = Math.abs(tilt) - tgt.steep;
     if (steep > 0) cost += 0.25 * steep * steep;
     const arriveVy = out.y - G * dt;
     if (nextSide === 'ceil') {
@@ -169,20 +190,23 @@
     }
     const vo = Math.hypot(out.x, out.y);
     if (vo > tgt.vcap) cost += 0.3 * (vo - tgt.vcap) ** 2;
+    else if (vo < tgt.vmin) cost += 0.02 * (tgt.vmin - vo) ** 2; // a kicker should send it flying
     return { cost, lx, ly };
   }
 
   // Best achievable cheap cost for the strike after this one (lookahead).
   function nextStrikeCost(p, v, w, dt, dir, side) {
-    const tgt = strikeTarget(p, v, dt, dir, side, 'floor', 1);
+    const tgt = strikeTarget(p, v, dt, dir, side, 'floor', 1, kickNext);
     const base = side === 'ceil' ? Math.PI : 0;
     let best = Infinity;
-    for (let phi = base - 1.15; phi <= base + 1.15; phi += 0.05) {
-      const nx = Math.sin(phi), ny = Math.cos(phi);
-      if (v.x * nx + v.y * ny > -0.2) continue;
-      const out = impact(v.x, v.y, w, nx, ny);
-      const c = coreCost(p, out, dt, tgt, phi - base, 'floor').cost;
-      if (c < best) best = c;
+    for (const f of kickNext > 0 ? KICK_FRACS : [0]) {
+      for (let phi = base - tgt.span; phi <= base + tgt.span; phi += 0.05) {
+        const nx = Math.sin(phi), ny = Math.cos(phi);
+        if (v.x * nx + v.y * ny > -0.2) continue;
+        const out = impact(v.x, v.y, w, nx, ny, kickNext * f);
+        const c = coreCost(p, out, dt, tgt, phi - base, 'floor').cost;
+        if (c < best) best = c;
+      }
     }
     return best;
   }
@@ -190,17 +214,18 @@
   // Choose this bar's tilt. With `ahead` = {dt} it also looks one strike
   // ahead, so a bounce that sets up a good next strike is preferred.
   function planBounce(p, vin, win, dt, dir, rnd, half, prevDt, recent, trail, side, nextSide, ahead) {
-    const tgt = strikeTarget(p, vin, dt, dir, side, nextSide, 0.88 + 0.24 * rnd());
+    const tgt = strikeTarget(p, vin, dt, dir, side, nextSide, 0.88 + 0.24 * rnd(), kickNow);
     const back = Math.min(prevDt, 0.4);
     const fwd = Math.min(dt, 0.5);
     const base = side === 'ceil' ? Math.PI : 0;
     let best = null;
+    let kick = 0;
     const evalPhi = (phi, minApproach, look) => {
       const nx = Math.sin(phi), ny = Math.cos(phi);
       const vn = vin.x * nx + vin.y * ny;
       if (vn > -minApproach) return; // must be moving into the bar
       const tX = ny, tY = -nx;
-      const out = impact(vin.x, vin.y, win, nx, ny);
+      const out = impact(vin.x, vin.y, win, nx, ny, kick);
       const core = coreCost(p, out, dt, tgt, phi - base, nextSide);
       let cost = core.cost;
       if (best && cost > best.cost) return;
@@ -216,19 +241,24 @@
         if (!isFinite(c1)) return;
         cost += 0.7 * c1;
       }
-      if (!best || cost < best.cost) best = { cost, phi, nx, ny, tX, tY, vout, omega: out.w };
+      if (!best || cost < best.cost) best = { cost, phi, nx, ny, tX, tY, vout, omega: out.w, kick };
     };
-    // coarse pass with lookahead, then refine around the winner
-    for (let phi = base - 1.15; phi <= base + 1.15 + 1e-9; phi += 0.02) evalPhi(phi, 0.2, true);
+    // coarse pass with lookahead (per kick strength), then refine the winner
+    for (const f of kickNow > 0 ? KICK_FRACS : [0]) {
+      kick = kickNow * f;
+      for (let phi = base - tgt.span; phi <= base + tgt.span + 1e-9; phi += 0.02) evalPhi(phi, 0.2, true);
+    }
     if (best) {
       const c = best.phi;
+      kick = best.kick;
       best = null;
       for (let phi = c - 0.02; phi <= c + 0.02 + 1e-9; phi += 0.004) evalPhi(phi, 0.2, true);
     }
+    kick = 0;
     if (!best) for (let phi = -Math.PI; phi <= Math.PI; phi += 0.01) evalPhi(phi, 0.02, false);
     if (!best) {
       // ball is barely moving – a flat bar and a tiny hop
-      best = { cost: Infinity, phi: 0, nx: 0, ny: 1, tX: 1, tY: 0, vout: { x: dir * 0.4, y: 1.2 }, omega: (-dir * 0.4) / R };
+      best = { cost: Infinity, phi: 0, nx: 0, ny: 1, tX: 1, tY: 0, vout: { x: dir * 0.4, y: 1.2 }, omega: (-dir * 0.4) / R, kick: 0 };
     }
     return best;
   }
@@ -398,7 +428,15 @@
 
   /* ---------------- build a whole course ---------------- */
   function build(notesIn, opts) {
-    const o = Object.assign({ wireGap: 0.8, seed: 7 }, opts || {});
+    const o = Object.assign({ wireGap: 0.8, seed: 7, bumpers: 'off', energyAt: null }, opts || {});
+    // how hard the bars fire at time t: Wild = always, Auto = with intensity
+    const kickAt = (t) => {
+      if (o.bumpers === 'wild') return 1;
+      if (o.bumpers !== 'auto' || !o.energyAt) return 0;
+      const e = o.energyAt(t);
+      const x = Math.max(0, Math.min(1, (e - 0.6) / 0.3));
+      return x * x * (3 - 2 * x);
+    };
     const rnd = mulberry32(o.seed);
     const notes = [];
     for (const nt of notesIn) {
@@ -478,9 +516,13 @@
       // Follow the ball's own travel, except inside a fast passage, where the
       // direction is held so one odd bounce can't fold the run back on itself.
       const inRun = gap < FAST && i > 0 && note.t - notes[i - 1].t < FAST;
-      if (Math.abs(st.v.x) > 0.35 && !inRun) dir = Math.sign(st.v.x);
+      kickNow = isWire || isLast ? 0 : kickAt(note.t);
+      kickNext = next && !isLast ? kickAt(next.t) : 0;
+      if (kickNow > 0.3) {
+        // pinball: ping back and forth across the wall between bumpers
+        dir = Math.abs(st.p.x) > 0.15 ? -Math.sign(st.p.x) : -dir;
+      } else if (Math.abs(st.v.x) > 0.35 && !inRun) dir = Math.sign(st.v.x);
       let outward = st.p.x * dir;
-      let steep = false;
       if (outward > BAR_BAND * 0.5 && gap > 0.36) dir = -dir;
       else if (outward > BAR_BAND * 1.8) {
         // at the hard edge: turn on a note long enough to arc back over the
@@ -526,6 +568,7 @@
         lenL: L / 2 + off, lenR: L / 2 - off, L0: L,
         vin: Math.hypot(st.v.x, st.v.y),
         ceil: side === 'ceil',
+        kick: b.kick, // how hard this bar fired (0 = plain bar)
       });
       st.v = b.vout;
       st.w = b.omega;

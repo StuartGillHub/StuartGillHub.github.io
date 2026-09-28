@@ -197,6 +197,30 @@
       o.start(t); o.stop(t + 0.3);
     }
 
+    // Pinball kicker firing: a solenoid thump pitched to the note (two
+    // octaves down, so it stays in key) with a quick downward snap and a click.
+    bumper(songT, midi, k, cents) {
+      const ctx = this.ctx;
+      const t = this.ctxTimeFor(songT);
+      if (t < ctx.currentTime - 0.005) return;
+      let m = midi - 24;
+      while (m < 40) m += 12;
+      while (m > 55) m -= 12;
+      const f = 440 * Math.pow(2, (m - 69) / 12 + (cents || 0) / 1200);
+      const v = 0.35 + 0.65 * k;
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(f * 2, t);
+      o.frequency.exponentialRampToValueAtTime(f, t + 0.035);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, t);
+      g.gain.linearRampToValueAtTime(v * 0.55, t + 0.002);
+      g.gain.setTargetAtTime(0, t + 0.002, 0.07);
+      o.connect(g); g.connect(this.fxBus);
+      o.start(t); o.stop(t + 0.6);
+      this.click(t, v * 0.6, 1800);
+    }
+
     setRolling(speed) {
       if (!this.ctx) return;
       const now = this.ctx.currentTime;

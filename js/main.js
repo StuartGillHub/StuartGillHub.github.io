@@ -9,7 +9,7 @@
   const audio = new XB.AudioEngine();
 
   const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const settings = { density: 0.7, wireGap: 1.0, songVol: 0.9, fxVol: 0.35, sync: 0, look: 'auto', strobes: !reducedMotion };
+  const settings = { density: 0.7, wireGap: 1.0, songVol: 0.9, fxVol: 0.35, sync: 0, look: 'auto', strobes: !reducedMotion, bumpers: 'auto' };
   const state = {
     analysis: null, buffer: null, course: null, cam: null, name: '',
     playing: false, time: 0, fxCursor: 0, evCursor: 0, seed: 1,
@@ -184,12 +184,36 @@
     $('stats').textContent = `${state.analysis.key.name}${bpm} · ${look} look · ${state.course.bars.length} bars · ${wires} wire track${wires === 1 ? '' : 's'}`;
   }
 
+  // How hard the music is driving at time t, for Auto bumpers: the loudness
+  // around that moment (relative to the song's loud parts), boosted for
+  // driving dance tracks and held back for gentle ones.
+  function bumperDrive(show) {
+    const env = show.env, hz = show.envHz, n = env.length;
+    const pre = new Float64Array(n + 1);
+    for (let i = 0; i < n; i++) pre[i + 1] = pre[i] + env[i];
+    const avg = (t) => {
+      const a = Math.max(0, Math.min(n - 1, Math.round((t - 1) * hz)));
+      const b = Math.max(a + 1, Math.min(n, Math.round((t + 1) * hz)));
+      return (pre[b] - pre[a]) / (b - a);
+    };
+    // the song's own "full on" level: 90th percentile of the 2 s average
+    const lv = [];
+    for (let t = 0; t < n / hz; t += 0.5) lv.push(avg(t));
+    lv.sort((x, y) => x - y);
+    const full = lv[Math.floor(lv.length * 0.9)] || 1;
+    const drive = show.suggested === 'neon' ? 1.05 : 0.72;
+    return (t) => Math.min(1.2, avg(t) / full) * drive;
+  }
+
   function rebuild() {
     if (!state.analysis) return;
     const keepTime = state.course ? currentTime() : null;
     const notes = XB.Analysis.pickOnsets(state.analysis, settings.density);
     state.notes = notes;
-    state.course = XB.Course.build(notes, { wireGap: settings.wireGap, seed: state.seed });
+    state.course = XB.Course.build(notes, {
+      wireGap: settings.wireGap, seed: state.seed,
+      bumpers: settings.bumpers, energyAt: bumperDrive(XB.Analysis.lightShow(state.analysis)),
+    });
     state.cam = XB.Camera.build(state.course, renderer.visW, renderer.visH);
     updateStats();
     drawTimeline();
@@ -277,6 +301,7 @@
       while (state.fxCursor < bars.length && bars[state.fxCursor].t < horizon) {
         const b = bars[state.fxCursor++];
         if (settings.fxVol > 0) audio.xylo(b.t, b.midi, 0.35 + 0.65 * b.strength, state.analysis.tuning);
+        if (settings.fxVol > 0 && b.kick > 0.15) audio.bumper(b.t, b.midi, b.kick, state.analysis.tuning);
       }
       const ev = course.events;
       while (state.evCursor < ev.length && ev[state.evCursor].t < horizon) {
@@ -387,6 +412,9 @@
   // Look + strobe controls
   document.querySelectorAll('input[name="look"]').forEach((el) => {
     el.addEventListener('change', () => { if (el.checked) { settings.look = el.value; applyLook(); } });
+  });
+  document.querySelectorAll('input[name="bumpers"]').forEach((el) => {
+    el.addEventListener('change', () => { if (el.checked) { settings.bumpers = el.value; rebuild(); } });
   });
   $('strobes').checked = settings.strobes;
   $('strobes').addEventListener('change', () => { settings.strobes = $('strobes').checked; });
