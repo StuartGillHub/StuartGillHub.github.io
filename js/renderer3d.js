@@ -183,13 +183,13 @@ class Renderer3D {
     this.neon.group.visible = neon;
     this.wall.material = neon ? this.neon.wallMat : this.studioWallMat;
     this.ball.material = neon ? this.neon.ballMaterial(this.ballTex) : this.studioBallMat;
-    this.scene.background.set(neon ? '#050308' : '#23170f');
+    this.scene.background.set(neon ? '#000000' : '#23170f');
     this.scene.environment = neon ? this.neon.env : this.sceneEnv;
     this.scene.environmentIntensity = neon ? 0.8 : 0.55;
     this.r.toneMappingExposure = neon ? 1.0 : 0.95;
-    this.bloom.strength = neon ? 0.95 : 0.42;
+    this.bloom.strength = neon ? 0.8 : 0.42;
     this.bloom.radius = neon ? 0.55 : 0.6;
-    this.bloom.threshold = neon ? 0.8 : 1.02;
+    this.bloom.threshold = neon ? 0.85 : 1.02;
     this.glowLights.forEach((l) => { l.intensity = 0; });
     document.body.classList.toggle('skin-neon', neon);
     // rebuild the course with this skin's materials
@@ -562,7 +562,7 @@ class Renderer3D {
       this.ball.visible = false;
     }
     const { x, y } = this.cam;
-    const D = this.dist * (this.zoom || 1);
+    const D = this.dist * (this.zoom || 1) * (this.skin === 'neon' && this.neon.camPunch ? this.neon.camPunch : 1);
     // look at the wall from slightly above and to the left: bar tops,
     // track depth and cast shadows all read as 3D
     this.camera.position.set(x - D * 0.07, y + D * 0.2, ZB + D);
@@ -582,6 +582,7 @@ class Renderer3D {
     if (this.skin === 'neon' && show) {
       this.neon.prepare(show);
       this.neon.update(t, ball, this.cam, opts || { strobes: true });
+      this.bloom.strength = 0.8 + (this.neon.bloomBoost || 0);
     } else if (this.neon.flashEl) this.neon.flashEl.style.opacity = '0';
     this.composer.render();
   }

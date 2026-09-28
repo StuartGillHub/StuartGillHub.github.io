@@ -148,15 +148,17 @@ body.playing #playBtn .i-play { display: none; }
 
 /* Neon look: club-dark interface with neon accents */
 body.skin-neon {
-  --glass: rgba(10, 8, 20, 0.62);
-  --line: rgba(160, 120, 255, 0.28);
-  --muted: #b7a9d8;
-  --accent: #d11fb6;
-  --accent2: #37e6ff;
+  --bg: #000;
+  --glass: rgba(4, 8, 4, 0.66);
+  --line: rgba(182, 255, 0, 0.28);
+  --muted: #a9c7a0;
+  --accent: #5fbf00;
+  --accent2: #c6ff1a;
 }
 body.skin-neon .vignette { background:
-  linear-gradient(to top, rgba(120, 40, 255, 0.14), rgba(120, 40, 255, 0) 24%),
-  radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 40%, rgba(4,2,10,0.5) 78%, rgba(2,1,6,0.85) 100%); }
-body.skin-neon .btn.primary { background: linear-gradient(135deg, #b0129a, #6c2bff); box-shadow: 0 6px 24px rgba(209, 31, 182, 0.45); }
-body.skin-neon .brand b { color: #37e6ff; text-shadow: 0 0 12px rgba(55, 230, 255, 0.8); }
-body.skin-neon .playhead { background: #fff; box-shadow: 0 0 10px #37e6ff; }
+  linear-gradient(to top, rgba(140, 255, 0, 0.1), rgba(140, 255, 0, 0) 22%),
+  radial-gradient(ellipse at 50% 50%, rgba(0,0,0,0) 38%, rgba(0,0,0,0.55) 76%, rgba(0,0,0,0.9) 100%); }
+body.skin-neon .btn.primary { background: linear-gradient(135deg, #3e9c00, #a8e600); color: #061000; box-shadow: 0 0 22px rgba(182, 255, 0, 0.5); }
+body.skin-neon .brand b { color: #c6ff1a; text-shadow: 0 0 14px rgba(182, 255, 0, 0.9); }
+body.skin-neon .playhead { background: #fff; box-shadow: 0 0 10px #b6ff00; }
+body.skin-neon #playBtn { background: #6fd400; color: #061000; }
