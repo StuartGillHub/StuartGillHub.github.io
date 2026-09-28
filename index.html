@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Xylofall – your song, played by a falling ball</title>
+  <meta name="description" content="Upload a song. A ball falls down a wall of xylophone bars placed so every bounce lands on a note.">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="stage"></canvas>
+  <div class="vignette"></div>
+
+  <header class="topbar">
+    <div class="brand"><span class="dot"></span>Xylo<b>fall</b></div>
+    <div class="actions">
+      <label class="btn primary" id="uploadBtn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0-12l-4.5 4.5M12 3l4.5 4.5M4 15v4a2 2 0 002 2h12a2 2 0 002-2v-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Upload song</span>
+        <input id="file" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" hidden>
+      </label>
+      <button class="btn" id="audiusBtn">Audius</button>
+      <button class="btn" id="demoBtn">Demo tune</button>
+      <button class="btn icon" id="settingsBtn" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="16" cy="6" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="10" cy="12" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <aside class="panel hidden" id="settings">
+    <h3>Course</h3>
+    <label>Notes used <output id="densityOut"></output>
+      <input type="range" id="density" min="0" max="1" step="0.01" value="0.7">
+      <small><span>Only key hits</span><span>Every note</span></small>
+    </label>
+    <label>Wire track after a pause of <output id="wireOut"></output>
+      <input type="range" id="wireGap" min="0.8" max="3" step="0.05" value="1.0">
+    </label>
+    <h3>Sound</h3>
+    <label>Song volume <output id="songVolOut"></output>
+      <input type="range" id="songVol" min="0" max="1" step="0.01" value="0.9">
+    </label>
+    <label>Xylophone strike sound <output id="fxVolOut"></output>
+      <input type="range" id="fxVol" min="0" max="1" step="0.01" value="0.35">
+    </label>
+    <label>Picture/sound sync <output id="syncOut"></output>
+      <input type="range" id="sync" min="-200" max="200" step="5" value="0">
+      <small><span>Picture earlier</span><span>Picture later</span></small>
+    </label>
+  </aside>
+
+  <section class="welcome" id="welcome">
+    <div class="card">
+      <h1>Your song, played by a falling ball.</h1>
+      <p>Upload any song. Xylofall listens for its key notes and pins a xylophone bar to the wall
+        exactly where the ball will be at each one, so every bounce lands on the beat.
+        When the music pauses, the ball rolls along a wire track until the next note.</p>
+      <div class="cta">
+        <label class="btn primary big" for="file2">Choose a song
+          <input id="file2" type="file" accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac" hidden>
+        </label>
+        <button class="btn big" id="audiusBtn2">Find a song on Audius</button>
+        <button class="btn big" id="demoBtn2">Play the demo tune</button>
+      </div>
+      <p class="hint">or drop an audio file anywhere · MP3, WAV, M4A, OGG, FLAC · nothing is uploaded, it all runs in your browser</p>
+    </div>
+  </section>
+
+  <section class="sheet-wrap hidden" id="audiusSheet" aria-label="Find a song on Audius">
+    <div class="sheet">
+      <div class="sheet-head">
+        <div>
+          <h2>Play a song from Audius</h2>
+          <p>Full tracks from the open music service <a href="https://audius.co" target="_blank" rel="noopener">Audius</a>.</p>
+        </div>
+        <button class="btn icon" id="audiusClose" aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <form id="audiusForm" class="search" role="search">
+        <input id="audiusQuery" type="search" placeholder="Search songs or artists" autocomplete="off" enterkeyhint="search">
+        <button class="btn primary" type="submit">Search</button>
+      </form>
+      <div class="sheet-label" id="audiusLabel">Trending this week</div>
+      <ul class="tracks" id="audiusList"></ul>
+    </div>
+  </section>
+
+  <section class="progress hidden" id="progress">
+    <div class="card small">
+      <div class="spinner"></div>
+      <div>
+        <div id="progressLabel">Reading file</div>
+        <div class="meter"><i id="progressBar"></i></div>
+      </div>
+    </div>
+  </section>
+
+  <button class="bigplay hidden" id="bigPlay" aria-label="Play">
+    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+  </button>
+
+  <footer class="transport hidden" id="transport">
+    <button class="tbtn" id="playBtn" aria-label="Play/Pause">
+      <svg class="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+      <svg class="i-pause" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z" fill="currentColor"/></svg>
+    </button>
+    <button class="tbtn" id="restartBtn" aria-label="Restart">
+      <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 108-8H7m0 0l3-3M7 4l3 3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="track">
+      <div class="meta"><span id="songName">—</span><a id="songLink" class="hidden" target="_blank" rel="noopener">on Audius</a><span id="stats"></span></div>
+      <div class="timeline" id="timeline">
+        <canvas id="timelineCanvas"></canvas>
+        <div class="playhead" id="playhead"></div>
+      </div>
+    </div>
+    <div class="time" id="timeLabel">0:00</div>
+  </footer>
+
+  <div class="dropzone hidden" id="dropzone"><div>Drop your song</div></div>
+  <div class="toast hidden" id="toast"></div>
+
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
+  </script>
+  <script src="js/analysis.js"></script>
+  <script src="js/course.js"></script>
+  <script src="js/camera.js"></script>
+  <script src="js/renderer.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/audius.js"></script>
+  <script type="module" src="js/renderer3d.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
