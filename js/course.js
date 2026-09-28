@@ -91,8 +91,38 @@
   // real kicker with an adjustable coil, each bar fires only as hard as its
   // shot needs (a fraction of its strength), so the ball stays catchable.
   const KICK_V = 3.6;
+  const PIN_LANE = 0.45; // half-width of the pinball lane
   const KICK_FRACS = [0, 0.2, 0.4, 0.6, 0.8, 1];
+  const KICK_FRACS_LOOK = [0, 0.5, 1]; // coarser for the lookahead
   let kickNow = 0, kickNext = 0;
+
+  // Variety. The course is played in short phrases (4-8 notes), each with
+  // its own style: how far and how steeply the ball hops. On top of that the
+  // planner is charged for a bounce that copies one of the last two (same
+  // step, its mirror image, or the step before last), so long runs of
+  // identical zig-zags or staircases get broken up.
+  const STYLES = {
+    flow: { reach: 1, drop: 1 },
+    wide: { reach: 1.45, drop: 0.75 },
+    steep: { reach: 0.8, drop: 1.35 },
+    sweep: { reach: 0.95, drop: 1, hold: true }, // keep going the same way
+    switch: { reach: 1.1, drop: 1, flip: true }, // turn back as the phrase starts
+  };
+  const STYLE_NAMES = Object.keys(STYLES);
+  let style = STYLES.flow;
+  let hist = []; // recent steps [dx, dy, tilt] between consecutive bars
+  const REP_W = 0.035;
+  function repeatPenalty(dx, dy, tilt) {
+    let pen = 0;
+    const near = (h, m) => {
+      const d2 = ((dx - m * h[0]) / 0.07) ** 2 + ((dy - h[1]) / 0.07) ** 2 + ((tilt - m * h[2]) / 0.12) ** 2;
+      return Math.exp(-d2);
+    };
+    const n = hist.length;
+    if (n >= 1) pen += Math.max(near(hist[n - 1], 1), near(hist[n - 1], -1));
+    if (n >= 2) pen += near(hist[n - 2], 1);
+    return REP_W * pen;
+  }
 
   function impact(vx, vy, w, nx, ny, kick) {
     const tX = ny, tY = -nx;
@@ -149,6 +179,7 @@
     const pingPong = side === 'ceil' || nextSide === 'ceil';
     const k = kick || 0;
     // Musical staircase: short notes = small steps; longer notes = bigger hops.
+    steer *= pingPong ? 1 : style.reach;
     const reach = (pingPong ? 0.06 + 1.0 * dt : Math.min(0.06 + 0.6 * dt, 0.8)) * steer;
     // A bounce can only give back ~e*|v| of speed: if the ideal hop is out of
     // reach energetically, aim lower instead of asking for the impossible.
@@ -157,7 +188,7 @@
     // up to a bar overhead: high enough to still be rising when we get there
     if (nextSide === 'ceil') dy = 0.4 * dt + 0.5 * G * dt * dt - 0.02;
     else if (side === 'ceil') dy = -(0.12 + 0.3 * dt + 0.5 * G * dt * dt); // knocked back down, below where we came from
-    else dy = -Math.max(Math.min(0.07 + 0.38 * dt, 0.6), 0.5 * G * dt * dt - vmax * dt);
+    else dy = -Math.max(Math.min(0.07 + 0.38 * dt, 0.6) * style.drop, 0.5 * G * dt * dt - vmax * dt);
     // keep the ball calm enough for what's coming (fast notes need a slow ball)
     let vcap = pingPong ? 3.4 : 2.1 + 2 * dt;
     let rch = reach;
@@ -165,13 +196,16 @@
       // pinball: long, flat, fast shots across the wall, powered by the bumpers
       // (kept narrow enough to stay on a phone screen: the speed comes from a
       // steeper dive instead)
-      const pr = Math.min(0.25 + 2.2 * dt, 1.1) * steer;
+      const pr = Math.min((0.25 + 2.2 * dt) * Math.min(steer, 1.05), 1.1);
       rch = reach + (pr - reach) * k;
-      if (side !== 'ceil' && nextSide !== 'ceil') dy += (-(0.14 + 0.8 * dt) - dy) * k;
+      if (side !== 'ceil' && nextSide !== 'ceil') dy += (-(0.14 + 0.8 * dt) * style.drop - dy) * k;
       vcap += 5.5 * k;
     }
     // kicker bars may stand steeper, like the side kickers of a pinball table
-    return { tx: p.x + dir * rch, ty: p.y + dy, vcap, steep: 0.75 + 0.4 * k, span: 1.15 + 0.25 * k, vmin: 4.2 * k };
+    let tx = p.x + dir * rch;
+    // kicker shots stay in a lane that fits a phone screen
+    if (k > 0) tx += (clamp(tx, -PIN_LANE, PIN_LANE) - tx) * k;
+    return { tx, ty: p.y + dy, vcap, steep: 0.75 + 0.4 * k, span: 1.15 + 0.25 * k, vmin: 4.2 * k };
   }
 
   // Cheap part of a strike's cost: aim, tilt, speed and arrival direction.
@@ -190,23 +224,34 @@
     }
     const vo = Math.hypot(out.x, out.y);
     if (vo > tgt.vcap) cost += 0.3 * (vo - tgt.vcap) ** 2;
-    else if (vo < tgt.vmin) cost += 0.02 * (tgt.vmin - vo) ** 2; // a kicker should send it flying
+    else if (vo < tgt.vmin) cost += 0.05 * (tgt.vmin - vo) ** 2; // a kicker should send it flying
     return { cost, lx, ly };
   }
 
   // Best achievable cheap cost for the strike after this one (lookahead).
-  function nextStrikeCost(p, v, w, dt, dir, side) {
+  // `self` is the bar being planned: the flight after the next strike must
+  // not swing back through it (the best few candidates are checked).
+  function nextStrikeCost(p, v, w, dt, dir, side, self) {
     const tgt = strikeTarget(p, v, dt, dir, side, 'floor', 1, kickNext);
     const base = side === 'ceil' ? Math.PI : 0;
-    let best = Infinity;
-    for (const f of kickNext > 0 ? KICK_FRACS : [0]) {
+    const top = [];
+    for (const f of kickNext > 0 ? KICK_FRACS_LOOK : [0]) {
       for (let phi = base - tgt.span; phi <= base + tgt.span; phi += 0.05) {
         const nx = Math.sin(phi), ny = Math.cos(phi);
         if (v.x * nx + v.y * ny > -0.2) continue;
         const out = impact(v.x, v.y, w, nx, ny, kickNext * f);
         const c = coreCost(p, out, dt, tgt, phi - base, 'floor').cost;
-        if (c < best) best = c;
+        if (top.length < 3 || c < top[2].c) {
+          top.push({ c, out });
+          top.sort((a, b) => a.c - b.c);
+          if (top.length > 3) top.pop();
+        }
       }
+    }
+    let best = Infinity;
+    for (const e of top) {
+      const c = self ? e.c + barsPenalty(p, e.out, Math.min(dt, 0.6), [self]) : e.c;
+      if (c < best) best = c;
     }
     return best;
   }
@@ -228,6 +273,7 @@
       const out = impact(vin.x, vin.y, win, nx, ny, kick);
       const core = coreCost(p, out, dt, tgt, phi - base, nextSide);
       let cost = core.cost;
+      if (ahead || dt < 1) cost += repeatPenalty(core.lx - p.x, core.ly - p.y, phi - base);
       if (best && cost > best.cost) return;
       const vout = { x: out.x, y: out.y };
       cost += 4 * (clipPenalty(vin, -1, back, nx, ny, tX, tY, half) + clipPenalty(vout, 1, fwd, nx, ny, tX, tY, half));
@@ -237,7 +283,8 @@
       if (look && ahead) {
         const p1 = { x: core.lx, y: core.ly };
         const v1 = { x: out.x, y: out.y - G * dt };
-        const c1 = nextStrikeCost(p1, v1, out.w, ahead.dt, dir, nextSide);
+        const self = { sx: p.x - nx * R, sy: p.y - ny * R, tX, tY, nx, ny, lenL: half, lenR: half };
+        const c1 = nextStrikeCost(p1, v1, out.w, ahead.dt, dir, nextSide, self);
         if (!isFinite(c1)) return;
         cost += 0.7 * c1;
       }
@@ -426,9 +473,52 @@
     };
   }
 
+  /* ---------------- rests ---------------- */
+  // Give the ball a few more rides on the rails: where the course would go
+  // a long time without a wire track, open up a short rest by leaving out
+  // the weakest notes in a window of about a second and a half. It prefers
+  // windows of quiet, weak notes that end on a strong one (the music coming
+  // back in as the ball launches off the rail). No stretch without one runs much over `every` s.
+  function addRests(notes, wireGap, every) {
+    if (!every || notes.length < 12) return notes;
+    const need = wireGap + 0.35;
+    const t0 = notes[0].t + 3, t1 = notes[notes.length - 1].t - 3;
+    // stretches between existing wire gaps
+    const cuts = [t0];
+    for (let i = 1; i < notes.length; i++) {
+      if (notes[i].t - notes[i - 1].t > wireGap && notes[i].t > t0 && notes[i - 1].t < t1) cuts.push(notes[i - 1].t, notes[i].t);
+    }
+    cuts.push(t1);
+    const drop = new Set();
+    for (let s = 0; s + 1 < cuts.length; s += 2) {
+      const a0 = cuts[s], a1 = cuts[s + 1];
+      const k = Math.ceil((a1 - a0) / every) - 1; // no stretch longer than ~every
+      for (let j = 1; j <= k; j++) {
+        const c = a0 + ((a1 - a0) * j) / (k + 1);
+        let best = null;
+        for (let a = 0; a < notes.length; a++) {
+          const ta = notes[a].t;
+          if (ta < c - 5 || ta < a0 + 4) continue;
+          if (ta > c + 5) break;
+          let b = a + 1;
+          let lost = 0;
+          while (b < notes.length && notes[b].t - ta < need) { lost += 0.15 + notes[b].strength; b++; }
+          if (b >= notes.length || notes[b].t > a1 - 4 || b - a - 1 > 10) continue;
+          let used = false;
+          for (let q = a; q <= b; q++) if (drop.has(q)) used = true;
+          if (used) continue;
+          const cost = lost + 0.03 * Math.abs(ta - c) + 0.4 * (notes[b].t - ta - need) - 0.4 * notes[b].strength - 0.2 * notes[a].strength;
+          if (!best || cost < best.cost) best = { cost, a, b };
+        }
+        if (best) for (let q = best.a + 1; q < best.b; q++) drop.add(q);
+      }
+    }
+    return drop.size ? notes.filter((n, i) => !drop.has(i)) : notes;
+  }
+
   /* ---------------- build a whole course ---------------- */
   function build(notesIn, opts) {
-    const o = Object.assign({ wireGap: 0.8, seed: 7, bumpers: 'off', energyAt: null }, opts || {});
+    const o = Object.assign({ wireGap: 0.8, seed: 7, bumpers: 'off', energyAt: null, restEvery: 0 }, opts || {});
     // how hard the bars fire at time t: Wild = always, Auto = with intensity
     const kickAt = (t) => {
       if (o.bumpers === 'wild') return 1;
@@ -438,10 +528,11 @@
       return x * x * (3 - 2 * x);
     };
     const rnd = mulberry32(o.seed);
-    const notes = [];
+    let notes = [];
     for (const nt of notesIn) {
       if (!notes.length || nt.t - notes[notes.length - 1].t >= 0.07) notes.push(nt);
     }
+    notes = addRests(notes, o.wireGap, o.restEvery);
     const segs = [];
     const bars = [];
     const wires = [];
@@ -501,6 +592,9 @@
     const CEIL_BONUS = 0.04;
     let nextPlanned = 'floor';
     let side = 'floor';
+    style = STYLES.flow;
+    hist = [];
+    let styleName = 'flow', phraseLeft = 4, phraseStart = false, prevBar = null;
 
     for (let i = 0; i < notes.length; i++) {
       const note = notes[i];
@@ -518,10 +612,27 @@
       const inRun = gap < FAST && i > 0 && note.t - notes[i - 1].t < FAST;
       kickNow = isWire || isLast ? 0 : kickAt(note.t);
       kickNext = next && !isLast ? kickAt(next.t) : 0;
+      // new phrase, new style (never the same one twice running)
+      phraseStart = false;
+      if (--phraseLeft <= 0) {
+        const pool = STYLE_NAMES.filter((n) => n !== styleName);
+        styleName = pool[Math.floor(rnd() * pool.length)];
+        style = STYLES[styleName];
+        phraseLeft = 4 + Math.floor(rnd() * 5);
+        phraseStart = true;
+      }
+      // the step that led here, for the repeat check
+      if (prevBar) {
+        hist.push([st.p.x - prevBar.cx, st.p.y - prevBar.cy, prevBar.tilt]);
+        if (hist.length > 2) hist.shift();
+      } else hist = [];
       if (kickNow > 0.3) {
-        // pinball: ping back and forth across the wall between bumpers
-        dir = Math.abs(st.p.x) > 0.15 ? -Math.sign(st.p.x) : -dir;
+        // pinball: ping back and forth across the wall between bumpers, or
+        // in a sweep phrase run across the lane in short hops first
+        if (style.hold) { if (st.p.x * dir > 0.45) dir = -dir; }
+        else dir = Math.abs(st.p.x) > 0.15 ? -Math.sign(st.p.x) : -dir;
       } else if (Math.abs(st.v.x) > 0.35 && !inRun) dir = Math.sign(st.v.x);
+      if (phraseStart && style.flip && gap > 0.3 && !isWire) dir = -dir;
       let outward = st.p.x * dir;
       if (outward > BAR_BAND * 0.5 && gap > 0.36) dir = -dir;
       else if (outward > BAR_BAND * 1.8) {
@@ -569,9 +680,12 @@
         vin: Math.hypot(st.v.x, st.v.y),
         ceil: side === 'ceil',
         kick: b.kick, // how hard this bar fired (0 = plain bar)
+        style: styleName,
       });
       st.v = b.vout;
       st.w = b.omega;
+      prevBar = isWire ? null : { cx: st.p.x, cy: st.p.y, tilt: b.phi - (side === 'ceil' ? Math.PI : 0) };
+      if (isWire) phraseLeft = 1; // fresh style after each wire ride
 
       if (isLast) {
         addFlight(note.t + gap);

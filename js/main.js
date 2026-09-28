@@ -9,7 +9,7 @@
   const audio = new XB.AudioEngine();
 
   const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const settings = { density: 0.7, wireGap: 1.0, songVol: 0.9, fxVol: 0.35, sync: 0, look: 'auto', strobes: !reducedMotion, bumpers: 'auto' };
+  const settings = { density: 0.7, wireGap: 1.0, songVol: 0.9, fxVol: 0.35, sync: 0, look: 'auto', strobes: !reducedMotion, bumpers: 'auto', rests: true };
   const state = {
     analysis: null, buffer: null, course: null, cam: null, name: '',
     playing: false, time: 0, fxCursor: 0, evCursor: 0, seed: 1,
@@ -212,6 +212,7 @@
     state.notes = notes;
     state.course = XB.Course.build(notes, {
       wireGap: settings.wireGap, seed: state.seed,
+      restEvery: settings.rests ? 15 : 0,
       bumpers: settings.bumpers, energyAt: bumperDrive(XB.Analysis.lightShow(state.analysis)),
     });
     state.cam = XB.Camera.build(state.course, renderer.visW, renderer.visH);
@@ -416,6 +417,8 @@
   document.querySelectorAll('input[name="bumpers"]').forEach((el) => {
     el.addEventListener('change', () => { if (el.checked) { settings.bumpers = el.value; rebuild(); } });
   });
+  $('rests').checked = settings.rests;
+  $('rests').addEventListener('change', () => { settings.rests = $('rests').checked; rebuild(); });
   $('strobes').checked = settings.strobes;
   $('strobes').addEventListener('change', () => { settings.strobes = $('strobes').checked; });
 

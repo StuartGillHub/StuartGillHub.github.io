@@ -46,7 +46,9 @@
     for (let i = 0; i < n; i++) cy[i] -= visH * 0.06;
 
     const mY = visH * 0.3, mX = visW * 0.34;
-    for (let it = 0; it < 8; it++) {
+    // Later passes smooth over a shorter window: fast side-to-side pinball
+    // shots flip sign too quickly for the wide window to catch them.
+    for (let it = 0; it < 16; it++) {
       const corrY = new Float32Array(n), corrX = new Float32Array(n);
       let worst = 0;
       for (let i = 0; i < n; i++) {
@@ -57,7 +59,8 @@
         worst = Math.max(worst, Math.abs(corrY[i]), Math.abs(corrX[i]));
       }
       if (worst < 1e-3) break;
-      const sy = gaussSmooth(corrY, 0.26 / dt), sx = gaussSmooth(corrX, 0.35 / dt);
+      const late = it >= 8;
+      const sy = gaussSmooth(corrY, (late ? 0.16 : 0.26) / dt), sx = gaussSmooth(corrX, (late ? 0.18 : 0.35) / dt);
       for (let i = 0; i < n; i++) { cy[i] += sy[i] * 1.6; cx[i] += sx[i] * 1.6; }
     }
     return { t0, dt, n, cx, cy };
