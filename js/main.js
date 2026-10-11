@@ -222,9 +222,23 @@
   }
 
   /* ---------- transport ---------- */
+  // The picture runs on a smooth clock: it advances with the display's own
+  // timer and is gently pulled towards the audio clock, so frames get evenly
+  // spaced times even though the audio clock moves in steps. A big
+  // disagreement (seek, audio glitch, tab switch) snaps it straight back.
+  const clock = { t: 0, p: 0, on: false };
   function currentTime() {
-    if (state.playing) return audio.songTime() + settings.sync / 1000;
-    return state.time;
+    if (!state.playing) { clock.on = false; return state.time; }
+    const raw = audio.songTime() + settings.sync / 1000;
+    const now = performance.now() / 1000;
+    if (!clock.on || now - clock.p > 0.25) { clock.on = true; clock.t = raw; clock.p = now; return raw; }
+    const dt = now - clock.p;
+    const pred = clock.t + dt;
+    const err = raw - pred;
+    // closes the gap with a ~0.25 s time constant, whatever the frame rate
+    clock.t = Math.abs(err) > 0.06 ? raw : pred + err * (1 - Math.exp(-dt / 0.25));
+    clock.p = now;
+    return clock.t;
   }
   function endTime() {
     return Math.max(state.buffer ? state.buffer.duration : 0, state.course ? state.course.tEnd : 0);
@@ -428,6 +442,7 @@
   XB.app.pause = pause;
   XB.app.play = play;
   XB.app.rebuild = rebuild;
+  XB.app.currentTime = currentTime;
   XB.app.renderAt = (t) => { pause(); state.time = t; renderer.draw(state.course, state.cam, t, state.show, settings); };
   XB.app.setLook = (v) => { settings.look = v; document.querySelector(`input[name="look"][value="${v}"]`).checked = true; applyLook(); };
 })();

@@ -29,6 +29,17 @@ const metalTint = (pc) => new THREE.Color().setHSL(METAL_HUES[pc] / 360, 0.34, 0
 const WOODS = ['#7b2f1d', '#a3502b', '#5f3a24', '#b8733f', '#8c3a22', '#caa06a',
   '#6e2a1a', '#b5613a', '#4f3322', '#9c5a36', '#7d4527', '#d0a877'];
 const GLOW = new THREE.Color('#ffb45c');
+const WHITE = new THREE.Color('#ffffff');
+const QUALITY = [
+  { scale: 1, msaa: true, shadow: 2048 },
+  { scale: 0.85, msaa: true, shadow: 2048 },
+  { scale: 0.85, msaa: false, shadow: 1024 },
+  { scale: 0.72, msaa: false, shadow: 1024 },
+  { scale: 0.6, msaa: false, shadow: 1024 },
+];
+// Most pixels the main pass may render (~1080p plus a little): beyond this,
+// a 1440p/4K screen at 2x would cost several times more for little gain.
+const PIXEL_BUDGET = 2.4e6;
 const BRASS = '#c9a063';
 
 // A dim room with warm neon strips, used only for reflections, so polished
@@ -209,26 +220,50 @@ class Renderer3D {
   }
 
   // Adaptive quality: if frames are slow, render at a lower pixel ratio.
+  // Automatic quality. Learns the display's refresh interval from the
+  // shortest frame gaps, and if frames keep taking clearly longer than both
+  // that and a 55 fps floor, steps down: render resolution first, then
+  // multisampling and shadow resolution. Never steps back up, so it can't
+  // oscillate.
   adapt() {
     const now = performance.now();
     if (this.lastT) {
       const dt = now - this.lastT;
-      if (dt < 200) this.avg = this.avg ? this.avg * 0.95 + dt * 0.05 : dt;
-      this.frames = (this.frames || 0) + 1;
-      if (this.frames > 90 && this.avg > 24 && this.quality > 0.55) {
-        this.quality = Math.max(0.55, this.quality - 0.2);
-        this.frames = 0;
-        this.resize();
-      }
+      if (dt < 100) {
+        this.refresh = Math.min(this.refresh || 1e9, dt) * 0.999 + dt * 0.001; // slowly forgets
+        this.avg = this.avg ? this.avg * 0.93 + dt * 0.07 : dt;
+        this.frames = (this.frames || 0) + 1;
+        const budget = Math.max(this.refresh * 1.3, 18.2);
+        if (this.frames > 75 && this.avg > budget && this.level < QUALITY.length - 1) {
+          this.level++;
+          this.frames = 0;
+          this.avg = 0;
+          this.applyQuality();
+        }
+      } else this.frames = 0; // a stall (tab switch, course build) isn't a trend
     }
     this.lastT = now;
   }
+  applyQuality() {
+    const q = QUALITY[this.level];
+    this.quality = q.scale;
+    const samples = q.msaa ? 4 : 0;
+    for (const rt of [this.composer.renderTarget1, this.composer.renderTarget2]) {
+      if (rt.samples !== samples) { rt.samples = samples; rt.dispose(); }
+    }
+    if (this.key.shadow.mapSize.x !== q.shadow) {
+      this.key.shadow.mapSize.set(q.shadow, q.shadow);
+      if (this.key.shadow.map) { this.key.shadow.map.dispose(); this.key.shadow.map = null; }
+    }
+    this.resize();
+  }
 
   resize() {
-    if (this.quality == null) this.quality = 1;
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2) * this.quality;
+    if (this.quality == null) { this.level = 0; this.quality = QUALITY[0].scale; }
     this.W = window.innerWidth;
     this.H = window.innerHeight;
+    const fit = Math.sqrt(PIXEL_BUDGET / (this.W * this.H));
+    this.dpr = Math.max(0.5, Math.min(window.devicePixelRatio || 1, 2, fit) * this.quality);
     const aspect = this.W / this.H;
     this.r.setPixelRatio(this.dpr);
     this.r.setSize(this.W, this.H, false);
@@ -524,7 +559,7 @@ class Renderer3D {
         if (o.strip) {
           if (!o.flashMat) o.flashMat = new THREE.MeshBasicMaterial({ toneMapped: false });
           o.strip.material = o.flashMat;
-          o.flashMat.color.copy(neonNoteColor(o.pc)).lerp(new THREE.Color('#ffffff'), (0.2 + 0.6 * kick) * glow).multiplyScalar(1.4 + (5 + 6 * kick) * glow);
+          o.flashMat.color.copy(neonNoteColor(o.pc)).lerp(WHITE, (0.2 + 0.6 * kick) * glow).multiplyScalar(1.4 + (5 + 6 * kick) * glow);
         }
         lights.push({ o, glow, age });
         continue;
@@ -575,6 +610,15 @@ class Renderer3D {
       }
     });
   }
+  // Only bars near the view take part in rendering (and the shadow pass):
+  // a long song has thousands of meshes, nearly all far off-screen.
+  cullBars() {
+    const cy = this.cam.y, cx = this.cam.x, rY = this.visH * 1.1 + 0.5, rX = this.visW * 0.75 + 0.6;
+    for (const o of this.barObjs) {
+      const v = Math.abs(o.base.y - cy) < rY && Math.abs(o.base.x - cx) < rX;
+      if (o.grp.visible !== v) o.grp.visible = v;
+    }
+  }
   resetBar(o) {
     o.grp.position.set(o.base.x, o.base.y, ZB);
     o.grp.rotation.z = o.base.rot;
@@ -596,6 +640,7 @@ class Renderer3D {
       this.ball.position.set(ball.x, ball.y, ZB);
       this.ball.rotation.z = ball.ang;
       this.updateBars(t);
+      this.cullBars();
       this.lastBall = ball;
     } else {
       if (this.course) { this.clearCourse(); this.course = null; }

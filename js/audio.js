@@ -135,9 +135,20 @@
       if (!c) return 0;
       return (c.outputLatency || 0) + (c.baseLatency || 0);
     }
-    // Song time currently *audible*.
+    // Song time currently *audible*. Where the browser offers it, use the
+    // output timestamp (when the audio being heard left the context, matched
+    // to the performance clock) rather than currentTime, which only moves in
+    // whole audio buffers (often ~10 ms steps).
     songTime() {
-      return this.ctx.currentTime - this.startCtx + this.startSong - this.latency();
+      const c = this.ctx;
+      if (c.getOutputTimestamp) {
+        const ts = c.getOutputTimestamp();
+        if (ts && ts.contextTime > 0 && ts.performanceTime > 0) {
+          const ctxT = ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+          return ctxT - this.startCtx + this.startSong;
+        }
+      }
+      return c.currentTime - this.startCtx + this.startSong - this.latency();
     }
     ctxTimeFor(songT) { return this.startCtx + (songT - this.startSong); }
 

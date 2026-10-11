@@ -14,7 +14,9 @@ const PALETTES = [
 ];
 // Note colours span lime -> green -> cyan -> electric blue.
 const NEON_HUES = [74, 82, 90, 98, 108, 122, 140, 158, 172, 184, 194, 204];
-export const neonNoteColor = (pc) => new THREE.Color().setHSL(NEON_HUES[pc] / 360, 1, 0.55);
+// shared, read-only colours (callers copy them), so frames allocate nothing
+const NOTE_COLORS = NEON_HUES.map((h) => new THREE.Color().setHSL(h / 360, 1, 0.55));
+export const neonNoteColor = (pc) => NOTE_COLORS[pc];
 const THUNDER = new THREE.Color('#e6f0ff');
 
 const smooth = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
