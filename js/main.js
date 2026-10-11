@@ -299,8 +299,47 @@
   }
 
   /* ---------- main loop ---------- */
+  /* ---------- performance overlay (F key, or ?stats in the address) ---------- */
+  const stats = { el: null, times: [], last: 0, shown: 0 };
+  function toggleStats(on) {
+    if (on === undefined) on = !stats.el;
+    if (!on) { if (stats.el) stats.el.remove(); stats.el = null; return; }
+    stats.el = document.createElement('pre');
+    stats.el.className = 'stats-hud';
+    document.body.appendChild(stats.el);
+  }
+  function updateStats_(now) {
+    if (stats.last) stats.times.push(now - stats.last);
+    stats.last = now;
+    if (stats.times.length > 240) stats.times.shift();
+    if (!stats.el || now - stats.shown < 500) return;
+    stats.shown = now;
+    const ts = stats.times.slice(-120).sort((a, b) => a - b);
+    const avg = ts.reduce((a, b) => a + b, 0) / (ts.length || 1);
+    const p95 = ts[Math.floor(ts.length * 0.95)] || 0;
+    const long = stats.times.slice(-120).filter((x) => x > (renderer.refresh || 16.7) * 1.6).length;
+    const g = renderer.gpuInfo ? renderer.gpuInfo() : { name: '?' };
+    const R = renderer;
+    stats.el.textContent = [
+      `${(1000 / avg).toFixed(0)} fps   avg ${avg.toFixed(1)} ms   95% ${p95.toFixed(1)} ms`,
+      `dropped/late frames (last 120): ${long}`,
+      `screen ~${R.refresh ? (1000 / R.refresh).toFixed(0) : '?'} Hz   window ${R.W}x${R.H}   devicePixelRatio ${window.devicePixelRatio}`,
+      `drawing ${Math.round(R.W * R.dpr)}x${Math.round(R.H * R.dpr)}   quality step ${R.level || 0}`,
+      `GPU: ${g.name || 'unknown'}${g.software ? '  << SOFTWARE RENDERING' : ''}`,
+      `look ${state.skin || '-'}   bars ${state.course ? state.course.bars.length : 0}`,
+    ].join('\n');
+  }
+  if (/[?&]stats\b/.test(location.search)) toggleStats(true);
+  // Drawing without the graphics card is the usual reason this is slow on a
+  // fast computer: say so plainly.
+  setTimeout(() => {
+    const g = renderer.gpuInfo ? renderer.gpuInfo() : null;
+    if (g && g.software) toast('Your browser is drawing without your graphics card, so this will be slow. Turn on hardware acceleration in the browser settings (Chrome: Settings > System > "Use graphics acceleration when available"), then restart the browser.', 15000);
+  }, 1200);
+
   function frame() {
     requestAnimationFrame(frame);
+    updateStats_(performance.now());
     const course = state.course;
     let t = currentTime();
     if (course && state.playing && t > endTime() + 0.3) {
@@ -333,8 +372,13 @@
     const dur = endTime();
     const t0 = course.tStart;
     const p = Math.max(0, Math.min(1, (t - t0) / (dur - t0)));
-    $('playhead').style.left = `calc(${(p * 100).toFixed(3)}% - 1px)`;
-    $('timeLabel').textContent = window.innerWidth > 560 ? `${fmt(t)} / ${fmt(dur)}` : fmt(t);
+    // move the playhead with a transform (no page layout), and only rewrite
+    // the time label when the text actually changes
+    const ph = $('playhead');
+    const px = Math.round(p * (ph.parentNode.clientWidth || 0) * 2) / 2 - 1;
+    if (px !== frame.px) { frame.px = px; ph.style.transform = `translateX(${px}px)`; }
+    const label = window.innerWidth > 560 ? `${fmt(t)} / ${fmt(dur)}` : fmt(t);
+    if (label !== frame.label) { frame.label = label; $('timeLabel').textContent = label; }
   }
   requestAnimationFrame(frame);
 
@@ -360,6 +404,7 @@
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') closeAudius();
     if (e.target.tagName === 'INPUT') return;
+    if (e.code === 'KeyF') toggleStats();
     if (e.code === 'Space' && state.course) { e.preventDefault(); toggle(); }
     if (e.code === 'ArrowRight' && state.course) seek(currentTime() + 5);
     if (e.code === 'ArrowLeft' && state.course) seek(currentTime() - 5);

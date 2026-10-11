@@ -229,20 +229,45 @@ class Renderer3D {
     const now = performance.now();
     if (this.lastT) {
       const dt = now - this.lastT;
-      if (dt < 100) {
-        this.refresh = Math.min(this.refresh || 1e9, dt) * 0.999 + dt * 0.001; // slowly forgets
+      if (dt < 1000) {
+        // refresh interval: a low percentile of recent frame gaps (a single
+        // bunched-up frame can't fool it), never faster than 240 Hz
+        const g = (this.gaps = this.gaps || []);
+        if (dt < 100) g.push(dt);
+        if (g.length > 120) g.shift();
+        if (g.length >= 60 && (this.frames & 15) === 0) {
+          const srt = g.slice().sort((a, b) => a - b);
+          this.refresh = Math.max(4.1, srt[Math.floor(srt.length * 0.15)]);
+        }
+        if (!this.refresh) this.refresh = 16.7;
         this.avg = this.avg ? this.avg * 0.93 + dt * 0.07 : dt;
         this.frames = (this.frames || 0) + 1;
+        this.spent = (this.spent || 0) + dt;
         const budget = Math.max(this.refresh * 1.3, 18.2);
-        if (this.frames > 75 && this.avg > budget && this.level < QUALITY.length - 1) {
+        // judge after ~75 frames, or ~2 s of very slow ones
+        const enough = this.frames > 75 || (this.frames >= 8 && this.spent > 2000);
+        if (enough && this.avg > budget && this.level < QUALITY.length - 1) {
           this.level++;
           this.frames = 0;
+          this.spent = 0;
           this.avg = 0;
           this.applyQuality();
         }
-      } else this.frames = 0; // a stall (tab switch, course build) isn't a trend
+      } else this.frames = this.spent = 0; // a stall (tab switch, course build) isn't a trend
     }
     this.lastT = now;
+  }
+  // Which GPU the browser is drawing with (for the stats overlay), and
+  // whether it is a software fallback (hardware acceleration off/blocked).
+  gpuInfo() {
+    const gl = this.r.getContext();
+    let name = '';
+    try {
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      name = gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) || '';
+    } catch (e) { /* not exposed */ }
+    const software = /swiftshader|llvmpipe|softpipe|software|basic render/i.test(name);
+    return { name, software };
   }
   applyQuality() {
     const q = QUALITY[this.level];

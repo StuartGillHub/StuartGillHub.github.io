@@ -1,6 +1,7 @@
 :root {
   --bg: #23170f;
   --glass: rgba(38, 26, 18, 0.58);
+  --glass-solid: rgba(38, 26, 18, 0.82);
   --line: rgba(255, 226, 190, 0.16);
   --text: #fbf1e3;
   --muted: #d6c2a8;
@@ -146,12 +147,15 @@ body.playing #playBtn .i-play { display: none; }
 .panel label.check input { accent-color: var(--accent); width: 18px; height: 18px; margin: 0; }
 
 /* Strobe: a full-screen white flash, driven from the light show */
-.strobe { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 2; mix-blend-mode: screen; }
+/* plain white at partial opacity looks the same as a screen blend, without
+   making the browser blend the whole page every frame */
+.strobe { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 2; visibility: hidden; }
 
 /* Neon look: club-dark interface with neon accents */
 body.skin-neon {
   --bg: #000;
   --glass: rgba(4, 8, 4, 0.66);
+  --glass-solid: rgba(4, 8, 4, 0.84);
   --line: rgba(182, 255, 0, 0.28);
   --muted: #a9c7a0;
   --accent: #5fbf00;
@@ -164,3 +168,14 @@ body.skin-neon .btn.primary { background: linear-gradient(135deg, #3e9c00, #a8e6
 body.skin-neon .brand b { color: #c6ff1a; text-shadow: 0 0 14px rgba(182, 255, 0, 0.9); }
 body.skin-neon .playhead { background: #fff; box-shadow: 0 0 10px #b6ff00; }
 body.skin-neon #playBtn { background: #6fd400; color: #061000; }
+
+/* Controls that sit over the live 3D scene: no frosted-glass blur. A
+   backdrop blur over a canvas that changes every frame makes the browser
+   re-blur behind every control on every frame, a big cost on large screens.
+   A more opaque fill keeps them readable instead. */
+.btn, .transport, .toast, .bigplay {
+  backdrop-filter: none; -webkit-backdrop-filter: none; background-color: var(--glass-solid);
+}
+.playhead { will-change: transform; }
+.stats-hud { position: fixed; left: 12px; bottom: 96px; max-width: calc(100vw - 24px); white-space: pre-wrap; z-index: 9; margin: 0; padding: 8px 10px; border-radius: 8px;
+  background: rgba(0,0,0,0.75); color: #d6ffb0; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; pointer-events: none; }

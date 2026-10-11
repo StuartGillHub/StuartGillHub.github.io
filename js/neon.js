@@ -261,8 +261,16 @@ export class NeonShow {
     const fi = this.lastBefore(this.flashT, t);
     if (fi >= 0) { const f = this.flashes[fi]; flash = f.a * Math.exp(-(t - f.t) / f.tail); }
     if (this.flashEl) {
-      this.flashEl.style.opacity = wild ? Math.min(0.9, 0.9 * flash).toFixed(3) : '0';
-      this.flashEl.style.background = '#e6f0ff';
+      // only touch the overlay when it changes, and hide it entirely when
+      // dark so the browser doesn't composite a full-screen layer
+      const op = wild ? Math.min(0.9, 0.9 * flash) : 0;
+      const txt = op > 0.004 ? op.toFixed(3) : '0';
+      if (txt !== this.flashOp) {
+        this.flashOp = txt;
+        this.flashEl.style.opacity = txt;
+        this.flashEl.style.visibility = txt === '0' ? 'hidden' : 'visible';
+        this.flashEl.style.background = '#e6f0ff';
+      }
     }
     const fl = wild ? flash : 0;
 
