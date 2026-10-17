@@ -78,8 +78,9 @@
     }
 
     // view: { W, H, k (screen px per grid px), left (world x at screen left),
-    //         top (grid y at screen top) }; ball: { x, y, r } world/grid units
-    draw(ctx, view, ball) {
+    //         top (grid y at screen top) }; ball: { x, y, r, flash 0..1, hitAge s }
+    // grains: [{ x, y, z, size }] thrown sand
+    draw(ctx, view, ball, grains) {
       const st = this.strip;
       this.shade(st.takeDirty());
       const { W, H, k, left, top } = view;
@@ -92,10 +93,44 @@
       const g = ctx.createLinearGradient(W / 2 + lsx * W * 0.6, H / 2 + lsy * H * 0.6, W / 2 - lsx * W * 0.6, H / 2 - lsy * H * 0.6);
       g.addColorStop(0, 'rgba(255,180,92,0.10)'); g.addColorStop(1, 'rgba(30,18,8,0.28)');
       ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-      if (ball) this.drawBall(ctx, (ball.x - left) * k, (ball.y - top) * k, ball.r * k, lsx, lsy);
+      if (grains) this.drawGrains(ctx, grains, view, lsx, lsy);
+      if (ball) {
+        const bx = (ball.x - left) * k, by = (ball.y - top) * k, br = ball.r * k;
+        if (ball.flash > 0.01) this.drawHit(ctx, bx, by, br, ball.flash, ball.hitAge);
+        this.drawBall(ctx, bx, by, br, lsx, lsy, ball.flash);
+      }
     }
 
-    drawBall(ctx, x, y, r, lsx, lsy) {
+    // a hit: warm light pooling on the sand and a ring kicked out from the ball
+    drawHit(ctx, x, y, r, f, age) {
+      const g = P.GLOW;
+      const pool = ctx.createRadialGradient(x, y, r * 0.5, x, y, r * 4.5);
+      pool.addColorStop(0, `rgba(255,180,92,${0.38 * f})`); pool.addColorStop(1, 'rgba(255,180,92,0)');
+      ctx.fillStyle = pool;
+      ctx.beginPath(); ctx.arc(x, y, r * 4.5, 0, Math.PI * 2); ctx.fill();
+      const ringR = r * (1.3 + 5 * Math.min(1, age / 0.35));
+      ctx.strokeStyle = g; ctx.globalAlpha = 0.55 * f * Math.max(0, 1 - age / 0.35);
+      ctx.lineWidth = Math.max(1, r * 0.18);
+      ctx.beginPath(); ctx.arc(x, y, ringR, 0, Math.PI * 2); ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+
+    drawGrains(ctx, grains, view, lsx, lsy) {
+      const { k, left, top } = view;
+      ctx.fillStyle = 'rgba(25,14,6,0.28)';
+      for (const p of grains) { // shadows, offset away from the lamp by height
+        const s = p.size * k * 0.7;
+        ctx.fillRect((p.x - left - lsx * p.z * 0.6) * k - s / 2, (p.y - top - lsy * p.z * 0.6) * k - s / 2, s, s);
+      }
+      const c = STYLE.sand.map((v) => Math.min(255, Math.round(v * 1.15)));
+      ctx.fillStyle = `rgb(${c.join(',')})`;
+      for (const p of grains) {
+        const s = p.size * k * (1 + p.z * 0.004);
+        ctx.fillRect((p.x - left) * k - s / 2, (p.y - top - p.z * 0.15) * k - s / 2, s, s);
+      }
+    }
+
+    drawBall(ctx, x, y, r, lsx, lsy, flash) {
       const len = ((r * 1.3) / Math.tan(STYLE.elevation)) * 0.35;
       ctx.save();
       ctx.translate(x - lsx * len, y - lsy * len);
@@ -115,6 +150,10 @@
       rg.addColorStop(0, 'rgba(242,198,125,0.35)'); rg.addColorStop(1, 'rgba(242,198,125,0)');
       ctx.fillStyle = rg;
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      if (flash > 0.01) { // the steel catches the light on the hit
+        ctx.fillStyle = `rgba(255,214,150,${0.45 * flash})`;
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      }
     }
   }
 

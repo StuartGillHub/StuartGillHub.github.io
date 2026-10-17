@@ -66,9 +66,10 @@
 
     /* Sweep a ball of radius r from world (ax, ay) to (bx, by), its lowest
      * point `sink` below level; displaced sand goes into a ridge of width
-     * ridgeW around the contact edge, to the sides and ahead only. */
-    carve(ax, ay, bx, by, r) {
-      const sink = 0.32 * r, ridgeW = 0.9 * r;
+     * ridgeW around the contact edge, to the sides and ahead only. A
+     * zero-length sweep presses straight down (a crater, ridge all round). */
+    carve(ax, ay, bx, by, r, sinkFrac) {
+      const sink = (sinkFrac || 0.32) * r, ridgeW = 0.9 * r;
       const { W, H, h } = this;
       ax -= this.origin; bx -= this.origin;
       const a = Math.sqrt(Math.max(1e-6, r * r - (r - sink) * (r - sink))); // contact radius

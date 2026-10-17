@@ -394,6 +394,7 @@
     time: () => frameT,
     playing: () => state.playing,
     show: () => (state.analysis ? XB.Analysis.lightShow(state.analysis) : null),
+    notes: () => state.notes,
   });
   const modes = [xyloMode, sandMode];
   let mode = xyloMode;
