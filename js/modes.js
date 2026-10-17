@@ -23,7 +23,8 @@
   //   { type: 'range', label, min, max, step, value, format(v), onInput(v) }
   //   { type: 'select', label, options: [[value, label]], value, onChange(v) }
   //   { type: 'buttons', items: [{ label, onClick, title }] }
-  //   { type: 'check', label, hint, value, onChange(on) }
+  //   { type: 'check', label, hint, value, onChange(on), bind(input) }
+  //   { type: 'readout', label, bind(el) }   (the mode writes el.textContent)
   function mount(root, spec) {
     root.innerHTML = '';
     if (!spec) return;
@@ -71,6 +72,14 @@
         lab.append(inp, ' ' + c.label);
         if (c.hint) { const s = document.createElement('small'); s.textContent = c.hint; lab.appendChild(s); }
         root.appendChild(lab);
+        if (c.bind) c.bind(inp);
+      } else if (c.type === 'readout') {
+        const row = document.createElement('div');
+        row.className = 'readout';
+        const val = document.createElement('output');
+        row.append(c.label + ' ', val);
+        root.appendChild(row);
+        if (c.bind) c.bind(val);
       }
     }
   }

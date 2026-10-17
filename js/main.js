@@ -9,6 +9,7 @@
   const audio = new XB.AudioEngine();
 
   const reducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let songScale = 1; // a mode can play the song quieter (Pendulum Wave's accompaniment)
   const settings = { density: 0.7, wireGap: 1.0, songVol: 0.9, fxVol: 0.35, sync: 0, look: 'auto', strobes: !reducedMotion, bumpers: 'auto', rests: true };
   const state = {
     analysis: null, buffer: null, course: null, cam: null, name: '',
@@ -397,7 +398,21 @@
     notes: () => state.notes,
     transportShown: () => !$('transport').classList.contains('hidden'),
   });
-  const modes = [xyloMode, sandMode];
+  const pendulumCanvas = $('pendulum');
+  const pendulumMode = XB.PendulumMode({
+    canvas: pendulumCanvas,
+    audio,
+    hasTrack: () => !!state.course,
+    playing: () => state.playing,
+    playSong: () => { if (state.course && !state.playing) play(); },
+    pauseSong: () => pause(),
+    setSongScale: (k) => { songScale = k; if (audio.songGain) audio.setSongVolume(settings.songVol * songScale); },
+    key: () => (state.analysis ? state.analysis.key : null),
+    tuning: () => (state.analysis ? state.analysis.tuning : 0),
+    transportShown: () => !$('transport').classList.contains('hidden'),
+    toast,
+  });
+  const modes = [xyloMode, sandMode, pendulumMode];
   let mode = xyloMode;
   let modeSpec = null;
   function welcomeWanted() { return !state.course && mode === xyloMode; }
@@ -470,15 +485,16 @@
   window.addEventListener('keydown', (e) => {
     if (e.code === 'Escape') closeAudius();
     if (e.target.tagName === 'INPUT') return;
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && e.code !== 'KeyF' && e.code !== 'KeyH' && mode.onKey(e)) { e.preventDefault(); return; }
     if (e.code === 'KeyF') toggleStats();
+    if (e.code === 'KeyH') $('settings').classList.toggle('hidden');
     if (e.code === 'Space' && state.course) { e.preventDefault(); toggle(); }
     if (e.code === 'ArrowRight' && state.course) seek(currentTime() + 5);
     if (e.code === 'ArrowLeft' && state.course) seek(currentTime() - 5);
-    if (['KeyF', 'Space', 'ArrowRight', 'ArrowLeft', 'Escape'].includes(e.code)) return;
-    if (!e.ctrlKey && !e.metaKey && !e.altKey && mode.onKey(e)) e.preventDefault();
   });
   $('modeSelect').addEventListener('change', (e) => setMode(e.target.value));
   sandCanvas.addEventListener('click', () => { if (state.course) toggle(); $('settings').classList.add('hidden'); });
+  pendulumCanvas.addEventListener('click', () => $('settings').classList.add('hidden'));
 
   const tl = $('timeline');
   function tlSeek(e) {
@@ -505,7 +521,7 @@
   }
   bindRange('density', 'density', (v) => Math.round(v * 100) + '%', rebuild, false);
   $('wireOut') && bindRange('wireGap', 'wireGap', (v) => v.toFixed(2) + ' s', rebuild, false);
-  bindRange('songVol', 'songVol', (v) => Math.round(v * 100) + '%', () => audio.setSongVolume(settings.songVol), true);
+  bindRange('songVol', 'songVol', (v) => Math.round(v * 100) + '%', () => audio.setSongVolume(settings.songVol * songScale), true);
   bindRange('fxVol', 'fxVol', (v) => (v ? Math.round(v * 100) + '%' : 'off'), () => audio.setFxVolume(settings.fxVol), true);
   bindRange('sync', 'sync', (v) => (v > 0 ? '+' : '') + v + ' ms', () => { if (state.playing) { pause(); play(); } }, false);
   // apply initial volumes once the context exists
@@ -513,7 +529,7 @@
   audio.ensure = () => {
     const had = !!audio.ctx;
     const c = origEnsure();
-    if (!had) { audio.songGain.gain.value = settings.songVol; audio.fxGain.gain.value = settings.fxVol; }
+    if (!had) { audio.songGain.gain.value = settings.songVol * songScale; audio.fxGain.gain.value = settings.fxVol; }
     return c;
   };
 
@@ -560,6 +576,7 @@
   XB.app.setMode = setMode;
   XB.app.mode = () => mode;
   XB.app.sand = sandMode;
+  XB.app.pendulum = pendulumMode;
   XB.app.currentTime = currentTime;
   XB.app.renderAt = (t) => { pause(); state.time = t; renderer.draw(state.course, state.cam, t, state.show, settings); };
   XB.app.setLook = (v) => { settings.look = v; document.querySelector(`input[name="look"][value="${v}"]`).checked = true; applyLook(); };

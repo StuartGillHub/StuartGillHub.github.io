@@ -10,6 +10,7 @@
 <body>
   <canvas id="stage"></canvas>
   <canvas id="sand" class="hidden"></canvas>
+  <canvas id="pendulum" class="hidden"></canvas>
   <div class="vignette"></div>
   <div class="strobe" id="strobe" aria-hidden="true"></div>
 
@@ -34,6 +35,7 @@
       <select id="modeSelect" class="select">
         <option value="xylofall">Falling ball</option>
         <option value="sand">Sand Table</option>
+        <option value="pendulum">Pendulum Wave</option>
       </select>
     </label>
     <div id="modeControls"></div>
@@ -161,6 +163,10 @@
   <script src="js/sand/sim.js"></script>
   <script src="js/sand/render.js"></script>
   <script src="js/sand/mode.js"></script>
+  <script src="js/pendulum/mechanics.js"></script>
+  <script src="js/pendulum/bells.js"></script>
+  <script src="js/pendulum/render.js"></script>
+  <script src="js/pendulum/mode.js"></script>
   <script type="module" src="js/renderer3d.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>
