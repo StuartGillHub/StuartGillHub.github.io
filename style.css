@@ -11,7 +11,9 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); overflow: hidden;
   font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
-canvas#stage { position: fixed; inset: 0; display: block; touch-action: none; }
+canvas#stage, canvas#sand { position: fixed; inset: 0; display: block; touch-action: none; }
+canvas#sand { width: 100vw; height: 100vh; }
+canvas.hidden { display: none; }
 .vignette { position: fixed; inset: 0; pointer-events: none; z-index: 1;
   background:
     linear-gradient(to top, rgba(255,128,60,0.16), rgba(255,128,60,0) 22%),
@@ -179,3 +181,12 @@ body.skin-neon #playBtn { background: #6fd400; color: #061000; }
 .playhead { will-change: transform; }
 .stats-hud { position: fixed; left: 12px; bottom: 96px; max-width: calc(100vw - 24px); white-space: pre-wrap; z-index: 9; margin: 0; padding: 8px 10px; border-radius: 8px;
   background: rgba(0,0,0,0.75); color: #d6ffb0; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; pointer-events: none; }
+
+/* mode picker and mode controls */
+.panel .select { display: block; width: 100%; margin-top: 6px; padding: 8px 10px; border-radius: 10px; font: inherit; font-weight: 600;
+  color: var(--text); background: rgba(255,230,200,0.08); border: 1px solid var(--line); }
+.panel .select option { color: #1b120b; }
+.panel .mode-pick { margin-top: 2px; }
+.panel .btn-row { display: flex; gap: 8px; margin: 4px 0 14px; }
+.panel .btn-row .btn { flex: 1; justify-content: center; }
+body[data-mode="sand"] .vignette { display: none; }

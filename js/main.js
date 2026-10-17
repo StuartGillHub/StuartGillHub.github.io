@@ -49,7 +49,7 @@
     } catch (err) {
       console.error(err);
       show($('progress'), false);
-      show($('welcome'), !state.course);
+      show($('welcome'), welcomeWanted());
       toast("Sorry, that file couldn't be decoded. Try an MP3, WAV or M4A.", 5000);
     }
   }
@@ -75,7 +75,7 @@
   }
   function closeAudius() {
     show($('audiusSheet'), false);
-    if (!state.course && $('progress').classList.contains('hidden')) show($('welcome'), true);
+    if (welcomeWanted() && $('progress').classList.contains('hidden')) show($('welcome'), true);
   }
   function audiusMessage(text) {
     $('audiusList').innerHTML = '';
@@ -131,7 +131,7 @@
     } catch (err) {
       console.error(err);
       show($('progress'), false);
-      show($('welcome'), !state.course);
+      show($('welcome'), welcomeWanted());
       toast("That track couldn't be loaded from Audius. Try another one.", 5000);
     }
   }
@@ -167,6 +167,9 @@
     if (!renderer.setSkin) return;
     const show = state.analysis ? XB.Analysis.lightShow(state.analysis) : null;
     state.show = show;
+    // the look is the falling-ball mode's; another mode leaves the page alone
+    // (applied when switching back)
+    if (mode !== xyloMode) return;
     const skin = settings.look === 'auto' ? (show ? show.suggested : 'studio') : settings.look;
     renderer.setSkin(skin);
     state.skin = skin;
@@ -337,19 +340,22 @@
     if (g && g.software) toast('Your browser is drawing without your graphics card, so this will be slow. Turn on hardware acceleration in the browser settings (Chrome: Settings > System > "Use graphics acceleration when available"), then restart the browser.', 15000);
   }, 1200);
 
-  function frame() {
-    requestAnimationFrame(frame);
-    updateStats_(performance.now());
-    const course = state.course;
-    let t = currentTime();
-    if (course && state.playing && t > endTime() + 0.3) {
-      pause(); state.time = endTime(); t = state.time;
-    }
-    renderer.draw(course, state.cam, t, state.show, settings);
-    if (!course) return;
-
-    if (state.playing && audio.ctx) {
-      // schedule strike accents slightly ahead of time (sample-accurate)
+  /* ---------- modes ---------- */
+  // The falling-ball course: the app's original visualisation.
+  const xyloMode = {
+    id: 'xylofall',
+    name: 'Falling ball',
+    init() {
+      canvas.classList.remove('hidden');
+      if (state.analysis) applyLook();
+      // restore the page styling of the current look (dispose removed it)
+      document.body.classList.toggle('skin-neon', renderer.skin === 'neon');
+      show($('welcome'), welcomeWanted());
+    },
+    // strike accents and wire sounds, scheduled slightly ahead (sample-accurate)
+    update() {
+      const course = state.course;
+      if (!course || !state.playing || !audio.ctx) return;
       const horizon = audio.songTime() + audio.latency() + 0.25;
       const bars = course.bars;
       while (state.fxCursor < bars.length && bars[state.fxCursor].t < horizon) {
@@ -367,7 +373,67 @@
       }
       const b = renderer.lastBall;
       audio.setRolling(b && b.onWire ? b.speed : 0);
+    },
+    render(fc) { renderer.draw(state.course, state.cam, fc.t, state.show, settings); },
+    onKey() { return false; },
+    dispose() {
+      canvas.classList.add('hidden');
+      show($('welcome'), false);
+      if (audio.rollGain) audio.setRolling(0);
+      // leave no neon page styling or strobe behind
+      document.body.classList.remove('skin-neon');
+      const strobe = $('strobe');
+      strobe.style.opacity = '0'; strobe.style.visibility = 'hidden';
+      if (renderer.neon) renderer.neon.flashOp = null;
+    },
+    getControls() { return { element: $('xyloControls') }; },
+  };
+  const sandCanvas = $('sand');
+  const sandMode = XB.SandMode({
+    canvas: sandCanvas,
+    time: () => frameT,
+    playing: () => state.playing,
+    analysis: () => state.analysis,
+    notes: () => state.notes,
+    transportShown: () => !$('transport').classList.contains('hidden'),
+  });
+  const modes = [xyloMode, sandMode];
+  let mode = xyloMode;
+  let modeSpec = null;
+  function welcomeWanted() { return !state.course && mode === xyloMode; }
+  function setMode(id) {
+    const next = modes.find((m) => m.id === id) || xyloMode;
+    if (next === mode) return;
+    pause(); // switching modes stops the audio
+    mode.dispose();
+    XB.Modes.unmount($('modeControls'), modeSpec);
+    mode = next;
+    mode.init();
+    modeSpec = mode.getControls();
+    XB.Modes.mount($('modeControls'), modeSpec);
+    $('modeSelect').value = mode.id;
+    document.body.dataset.mode = mode.id;
+  }
+  modeSpec = xyloMode.getControls();
+  XB.Modes.mount($('modeControls'), modeSpec);
+  document.body.dataset.mode = 'xylofall';
+
+  let frameT = 0, lastFrame = 0;
+  function frame() {
+    requestAnimationFrame(frame);
+    const now = performance.now();
+    updateStats_(now);
+    const dt = lastFrame ? (now - lastFrame) / 1000 : 0;
+    lastFrame = now;
+    const course = state.course;
+    let t = currentTime();
+    if (course && state.playing && t > endTime() + 0.3) {
+      pause(); state.time = endTime(); t = state.time;
     }
+    frameT = t;
+    mode.update(dt);
+    mode.render({ t, dt, playing: state.playing });
+    if (!course) return;
 
     const dur = endTime();
     const t0 = course.tStart;
@@ -408,7 +474,11 @@
     if (e.code === 'Space' && state.course) { e.preventDefault(); toggle(); }
     if (e.code === 'ArrowRight' && state.course) seek(currentTime() + 5);
     if (e.code === 'ArrowLeft' && state.course) seek(currentTime() - 5);
+    if (['KeyF', 'Space', 'ArrowRight', 'ArrowLeft', 'Escape'].includes(e.code)) return;
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && mode.onKey(e)) e.preventDefault();
   });
+  $('modeSelect').addEventListener('change', (e) => setMode(e.target.value));
+  sandCanvas.addEventListener('click', () => { if (state.course) toggle(); $('settings').classList.add('hidden'); });
 
   const tl = $('timeline');
   function tlSeek(e) {
@@ -487,6 +557,9 @@
   XB.app.pause = pause;
   XB.app.play = play;
   XB.app.rebuild = rebuild;
+  XB.app.setMode = setMode;
+  XB.app.mode = () => mode;
+  XB.app.sand = sandMode;
   XB.app.currentTime = currentTime;
   XB.app.renderAt = (t) => { pause(); state.time = t; renderer.draw(state.course, state.cam, t, state.show, settings); };
   XB.app.setLook = (v) => { settings.look = v; document.querySelector(`input[name="look"][value="${v}"]`).checked = true; applyLook(); };

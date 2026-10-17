@@ -9,6 +9,7 @@
 </head>
 <body>
   <canvas id="stage"></canvas>
+  <canvas id="sand" class="hidden"></canvas>
   <div class="vignette"></div>
   <div class="strobe" id="strobe" aria-hidden="true"></div>
 
@@ -29,6 +30,14 @@
   </header>
 
   <aside class="panel hidden" id="settings">
+    <label class="mode-pick">Mode
+      <select id="modeSelect" class="select">
+        <option value="xylofall">Falling ball</option>
+        <option value="sand">Sand Table</option>
+      </select>
+    </label>
+    <div id="modeControls"></div>
+    <div id="xyloControls" class="hidden">
     <h3>Look</h3>
     <div class="seg" role="radiogroup" aria-label="Look">
       <label><input type="radio" name="look" value="auto" checked><span>Auto</span></label>
@@ -51,6 +60,7 @@
       <input type="range" id="wireGap" min="0.8" max="3" step="0.05" value="1.0">
     </label>
     <label class="check"><input type="checkbox" id="rests" checked> Extra rail rides <small>Leaves out a few weak notes now and then so the ball gets a ride on the rails.</small></label>
+    </div>
     <h3>Sound</h3>
     <label>Song volume <output id="songVolOut"></output>
       <input type="range" id="songVol" min="0" max="1" step="0.01" value="0.9">
@@ -139,12 +149,18 @@
   <script type="importmap">
     { "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
   </script>
+  <script src="js/palette.js"></script>
+  <script src="js/modes.js"></script>
   <script src="js/analysis.js"></script>
   <script src="js/course.js"></script>
   <script src="js/camera.js"></script>
   <script src="js/renderer.js"></script>
   <script src="js/audio.js"></script>
   <script src="js/audius.js"></script>
+  <script src="js/sand/path.js"></script>
+  <script src="js/sand/sim.js"></script>
+  <script src="js/sand/render.js"></script>
+  <script src="js/sand/mode.js"></script>
   <script type="module" src="js/renderer3d.js"></script>
   <script type="module" src="js/main.js"></script>
 </body>

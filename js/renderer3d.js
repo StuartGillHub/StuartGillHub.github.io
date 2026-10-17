@@ -28,7 +28,7 @@ const metalTint = (pc) => new THREE.Color().setHSL(METAL_HUES[pc] / 360, 0.34, 0
 // Warm tonewoods (kept for the start shelf).
 const WOODS = ['#7b2f1d', '#a3502b', '#5f3a24', '#b8733f', '#8c3a22', '#caa06a',
   '#6e2a1a', '#b5613a', '#4f3322', '#9c5a36', '#7d4527', '#d0a877'];
-const GLOW = new THREE.Color('#ffb45c');
+const GLOW = new THREE.Color(XB.Palette.GLOW);
 const WHITE = new THREE.Color('#ffffff');
 const QUALITY = [
   { scale: 1, msaa: true, shadow: 2048 },
@@ -40,7 +40,7 @@ const QUALITY = [
 // Most pixels the main pass may render (~1080p plus a little): beyond this,
 // a 1440p/4K screen at 2x would cost several times more for little gain.
 const PIXEL_BUDGET = 2.4e6;
-const BRASS = '#c9a063';
+const BRASS = XB.Palette.BRASS;
 
 // A dim room with warm neon strips, used only for reflections, so polished
 // metal and lacquer pick up the same light that washes the wall.

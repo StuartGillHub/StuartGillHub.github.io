@@ -100,6 +100,9 @@
     const highE = new Float32Array(nFrames);
     const lowTop = Math.round((150 / SR) * FRAME);
     const highBot = Math.round((4000 / SR) * FRAME);
+    // spectral centroid per frame (Hz): the brightness of the sound
+    const centroid = new Float32Array(nFrames);
+    const binHz = SR / FRAME;
 
     for (let f = 0; f < nFrames; f++) {
       const off = f * HOP;
@@ -112,10 +115,11 @@
       }
       rms[f] = Math.sqrt(e / FRAME);
       fft(re, im);
-      let sum = 0, lo = 0, hi = 0;
+      let sum = 0, lo = 0, hi = 0, cw = 0, cm = 0;
       for (let k = 1; k < maxBin; k++) {
         const m = Math.sqrt(re[k] * re[k] + im[k] * im[k]) * norm;
         if (k <= lowTop) lo += m * m; else if (k >= highBot) hi += m * m;
+        cw += m * k; cm += m;
         const l = Math.log1p(1000 * m);
         cur[k] = l;
         const d = l - prev[k];
@@ -123,6 +127,7 @@
       }
       flux[f] = f === 0 ? 0 : sum;
       lowE[f] = lo; highE[f] = hi;
+      centroid[f] = cm > 1e-9 ? (cw / cm) * binHz : 0;
       const t = prev; prev = cur; cur = t;
       if (f % 600 === 0) {
         onProgress && onProgress(0.05 + 0.85 * (f / nFrames), 'Listening for notes');
@@ -156,7 +161,7 @@
 
     onProgress && onProgress(0.93, 'Finding the key');
     const an = {
-      samples, odf, mean, rms, loud, nFrames, lowE, highE,
+      samples, odf, mean, rms, loud, nFrames, lowE, highE, centroid,
       duration: audioBuffer.duration,
       chromaCache: new Map(),
     };
@@ -467,5 +472,5 @@
     return NOTE_NAMES[((midi % 12) + 12) % 12] + (Math.floor(midi / 12) - 1);
   }
 
-  XB.Analysis = { analyse, pickOnsets, lightShow, noteName, SR };
+  XB.Analysis = { analyse, pickOnsets, lightShow, noteName, SR, HOP };
 })();
